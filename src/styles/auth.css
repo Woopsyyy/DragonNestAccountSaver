@@ -1,0 +1,103 @@
+.auth-panel {
+  width: min(100%, 960px);
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(280px, 0.78fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.auth-panel__copy,
+.auth-card {
+  padding: 24px;
+  border-radius: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.auth-panel__copy {
+  display: grid;
+  gap: 18px;
+  align-content: start;
+}
+
+.auth-panel__copy h2 {
+  font-size: clamp(2rem, 4vw, 3rem);
+}
+
+.auth-highlight-list {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-highlight {
+  display: flex;
+  align-items: start;
+  gap: 12px;
+}
+
+.auth-highlight__icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  background: rgba(114, 221, 255, 0.12);
+}
+
+.auth-card {
+  display: grid;
+  gap: 18px;
+  align-content: start;
+}
+
+.auth-card__header {
+  display: grid;
+  gap: 8px;
+}
+
+.auth-card__header strong {
+  color: var(--text-strong);
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+}
+
+.auth-form {
+  display: grid;
+  gap: 16px;
+}
+
+.auth-field-group {
+  display: grid;
+  gap: 10px;
+}
+
+.auth-password {
+  position: relative;
+}
+
+.auth-password .icon-button {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+}
+
+.auth-footer {
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.auth-toggle {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-weight: 700;
+  padding: 0;
+}
+
+@media (max-width: 900px) {
+  .auth-panel {
+    grid-template-columns: 1fr;
+  }
+}
