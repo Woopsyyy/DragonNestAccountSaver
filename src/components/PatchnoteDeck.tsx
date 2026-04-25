@@ -1,9 +1,9 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import { CalendarDays, ScrollText, Sparkles } from 'lucide-react'
+import { CalendarDays, ScrollText } from 'lucide-react'
 
 import type { Patchnote } from '../lib/supabase'
 import { OverlaySurface } from './ui/OverlaySurface'
-import { DetailLink, SectionHeader, SurfaceState } from './ui/InsightWidgets'
+import { SectionHeader, SurfaceState } from './ui/InsightWidgets'
 
 type PatchnoteDeckProps = {
   patchnotes: Patchnote[]
@@ -54,28 +54,38 @@ export function PatchnoteDeck({
             description={emptyDescription}
           />
         ) : (
-          <div className="patchnote-grid">
-            {sortedPatchnotes.map((note) => (
-              <button
-                key={note.id}
-                type="button"
-                className="patchnote-card"
-                onClick={() => setSelectedNote(note)}
-              >
-                <div className="patchnote-card__top">
-                  <span className="patchnote-card__icon">
-                    <Sparkles size={16} />
-                  </span>
-                  <span className="patchnote-card__date">
-                    <CalendarDays size={14} />
-                    {new Date(note.created_at).toLocaleDateString()}
-                  </span>
-                </div>
-                <strong>{note.title}</strong>
-                <p>{note.content}</p>
-                <DetailLink label="Read full patchnote" />
-              </button>
-            ))}
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Published</th>
+                  <th>Preview</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedPatchnotes.map((note) => (
+                  <tr key={note.id} className="row-clickable" onClick={() => setSelectedNote(note)}>
+                    <td>
+                      <div className="row-heading">
+                        <strong>{note.title}</strong>
+                      </div>
+                    </td>
+                    <td>
+                      <span className="patchnote-card__date">
+                        <CalendarDays size={14} />
+                        {new Date(note.created_at).toLocaleDateString()}
+                      </span>
+                    </td>
+                    <td>
+                      <p className="row-stack" style={{ margin: 0, opacity: 0.7 }}>
+                        {note.content.slice(0, 60)}...
+                      </p>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </section>

@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, Fragment, type FormEvent } from 'react'
 import {
   BookOpen,
+  Calculator,
+  ChevronDown,
   CircleGauge,
   Database,
   FilterX,
   LayoutDashboard,
-  PencilLine,
+  PawPrint,
+  Pencil,
   Plus,
   RefreshCcw,
   Settings,
@@ -15,10 +18,8 @@ import {
   Ticket,
   Users,
 } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
 
 import { AccountDrawer, type DrawerDraft, type DrawerErrors } from './AccountDrawer'
-import ClockCard from './ClockCard'
 import LightRays from './LightRays'
 import ToastNotification from './ToastNotification'
 import { PatchnoteDeck } from './PatchnoteDeck'
@@ -31,15 +32,24 @@ import {
 } from '../lib/classes'
 import {
   createDragonAccount,
+  createPet,
+  createTicket,
+  deleteDragonAccount,
+  deletePet,
+  deleteTicket,
   getBrowserClient,
   listClassTree,
   listDragonAccounts,
   listPatchnotes,
+  listPets,
+  listTickets,
   updateDragonAccount,
   updateDragonAccountCounter,
   updateMyPassword,
   updateMyUsername,
   type CounterField,
+  type DnPet,
+  type DnTicket,
   type DragonAccount,
   type DragonAccountInput,
   type ClassNode as FlatClassNode,
@@ -47,20 +57,55 @@ import {
   type User,
 } from '../lib/supabase'
 import {
-  BarChart,
-  ChartCard,
-  DonutChart,
   MetricCard,
   SectionHeader,
   SurfaceState,
+} from './ui/InsightWidgets'
+import { CommandShell, type CommandNavItem } from './ui/CommandShell'
+
+import {
+  FileText,
+  GitBranch,
+  KeyRound,
+  Layers3,
+  Trash2,
+} from 'lucide-react'
+import { OverlaySurface } from './ui/OverlaySurface'
+import {
+  BarChart,
+  ChartCard,
+  DonutChart,
   TrendAreaChart,
 } from './ui/InsightWidgets'
-import { CommandShell, type CommandAction, type CommandNavItem } from './ui/CommandShell'
+import {
+  createClassNode,
+  createPatchnote,
+  deleteClassNode,
+  deletePatchnote,
+  listAllUsers,
+  resetUserPassword,
+  toggleUserAdmin,
+} from '../lib/supabase'
+
 
 type DrawerMode = 'create' | 'edit' | null
 type LoadState = 'loading' | 'ready' | 'error'
 type PendingCounterMap = Record<string, boolean>
-type Tab = 'overview' | 'accounts' | 'patchnotes' | 'settings'
+type Tab = 'overview' | 'classes' | 'calculator' | 'spam' | 'ticket-tab' | 'patchnotes' | 'pet' | 'settings' | 'admin-overview' | 'users' | 'admin-patchnotes' | 'admin-classes'
+type AddMode = 'class' | 'type_class' | 'sub_class'
+
+type TicketDraft = {
+  ign: string
+  ticket_name: string
+  expiration_date: string
+}
+type TicketDrawerMode = 'create' | null
+
+type PetDraft = {
+  ign: string
+  expiration_date: string
+}
+type PetDrawerMode = 'create' | null
 
 const ROSTER_TIMEOUT_MS = 8000
 
@@ -74,6 +119,22 @@ function createEmptyDraft(): DrawerDraft {
   }
 }
 
+function createEmptyTicketDraft(): TicketDraft {
+  return { ign: '', ticket_name: '', expiration_date: '' }
+}
+
+function createEmptyPetDraft(): PetDraft {
+  return { ign: '', expiration_date: '' }
+}
+
+function isNearExpiration(dateStr: string): boolean {
+  const expDate = new Date(dateStr)
+  const now = new Date()
+  const diffTime = expDate.getTime() - now.getTime()
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+  return diffDays <= 1
+}
+
 function createDraftFromAccount(account: DragonAccount): DrawerDraft {
   return {
     account: account.account,
@@ -84,25 +145,6 @@ function createDraftFromAccount(account: DragonAccount): DrawerDraft {
   }
 }
 
-function parseIntegerField(
-  value: string,
-  minimum: number,
-  label: string,
-): { parsed: number | null; error?: string } {
-  const trimmed = value.trim()
-
-  if (!trimmed || !/^-?\d+$/.test(trimmed)) {
-    return { parsed: null, error: `${label} must be a whole number.` }
-  }
-
-  const parsed = Number.parseInt(trimmed, 10)
-
-  if (parsed < minimum) {
-    return { parsed, error: `${label} must be at least ${minimum}.` }
-  }
-
-  return { parsed }
-}
 
 function validateDraft(draft: DrawerDraft): {
   data: DragonAccountInput | null
@@ -119,22 +161,6 @@ function validateDraft(draft: DrawerDraft): {
     errors.class_path = 'Choose a class path before saving.'
   }
 
-  const level = parseIntegerField(draft.level, 1, 'Level')
-  const spam = parseIntegerField(draft.spam, 0, 'Spam')
-  const ticket = parseIntegerField(draft.ticket, 0, 'Ticket')
-
-  if (level.error) {
-    errors.level = level.error
-  }
-
-  if (spam.error) {
-    errors.spam = spam.error
-  }
-
-  if (ticket.error) {
-    errors.ticket = ticket.error
-  }
-
   if (Object.keys(errors).length > 0) {
     return { data: null, errors }
   }
@@ -145,15 +171,15 @@ function validateDraft(draft: DrawerDraft): {
       class_base: getClassBase(draft.class_path),
       class_path: draft.class_path,
       class_label: joinClassPath(draft.class_path),
-      level: level.parsed ?? 1,
-      spam: spam.parsed ?? 0,
-      ticket: ticket.parsed ?? 0,
+      level: 1,
+      spam: 0,
+      ticket: 0,
     },
     errors,
   }
 }
 
-function toMessage(error: unknown): string {
+function toMessage(error: unknown, fallback?: string): string {
   if (error instanceof Error) {
     return error.message
   }
@@ -166,7 +192,7 @@ function toMessage(error: unknown): string {
     }
   }
 
-  return 'Unexpected error. Please check your Supabase connection and table permissions.'
+  return fallback ?? 'Unexpected error. Please check your Supabase connection and table permissions.'
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
@@ -215,39 +241,335 @@ function monthlyTrend(records: string[], length = 6) {
   return buckets.map(({ label, value }) => ({ label, value }))
 }
 
-function levelBandData(accounts: DragonAccount[]) {
-  return [
-    {
-      label: '1-39',
-      value: accounts.filter((account) => account.level < 40).length,
-    },
-    {
-      label: '40-79',
-      value: accounts.filter((account) => account.level >= 40 && account.level < 80).length,
-    },
-    {
-      label: '80-99',
-      value: accounts.filter((account) => account.level >= 80 && account.level < 100).length,
-    },
-    {
-      label: '100+',
-      value: accounts.filter((account) => account.level >= 100).length,
-    },
-  ]
+function buildPassword() {
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+  const special = '!@#$%^&*()-_=+'
+  const randomValues = new Uint32Array(10)
+  crypto.getRandomValues(randomValues)
+
+  return Array.from(randomValues, (value, index) =>
+    index < 8
+      ? chars[value % chars.length]
+      : special[value % special.length],
+  ).join('')
 }
 
-function ticketTotalsByClass(accounts: DragonAccount[]) {
-  const totals = new Map<string, number>()
+function ClassTreeManager({
+  nodes,
+  onCreate,
+  onDelete,
+}: {
+  nodes: FlatClassNode[]
+  onCreate: (label: string, parentId: string | null, sortOrder: number) => Promise<void>
+  onDelete: (id: string) => Promise<void>
+}) {
+  const [isAddOpen, setIsAddOpen] = useState(false)
+  const [expandedClassId, setExpandedClassId] = useState<string | null>(null)
+  const [addMode, setAddMode] = useState<AddMode>('class')
+  const [selectedClassId, setSelectedClassId] = useState('')
+  const [selectedTypeClassId, setSelectedTypeClassId] = useState('')
+  const [newLabel, setNewLabel] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  accounts.forEach((account) => {
-    totals.set(account.class_base, (totals.get(account.class_base) ?? 0) + account.ticket)
-  })
+  const rootNodes = nodes.filter((node) => node.parent_id === null)
 
-  return [...totals.entries()]
-    .sort((left, right) => right[1] - left[1])
-    .slice(0, 6)
-    .map(([label, value]) => ({ label, value }))
+  function getChildren(parentId: string) {
+    return nodes
+      .filter((node) => node.parent_id === parentId)
+      .sort((left, right) => left.sort_order - right.sort_order)
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError(null)
+
+    if (!newLabel.trim()) {
+      setError('Node name is required.')
+      return
+    }
+
+    let parentId: string | null = null
+
+    if (addMode === 'type_class') {
+      if (!selectedClassId) {
+        setError('Select a class first.')
+        return
+      }
+      parentId = selectedClassId || null
+    }
+
+    if (addMode === 'sub_class') {
+      if (!selectedTypeClassId) {
+        setError('Select a type class first.')
+        return
+      }
+      parentId = selectedTypeClassId || null
+    }
+
+    const siblingCount = nodes.filter((node) => node.parent_id === parentId).length
+    setSaving(true)
+
+    try {
+      await onCreate(newLabel.trim(), parentId, siblingCount)
+      setNewLabel('')
+      setSelectedClassId('')
+      setSelectedTypeClassId('')
+      setAddMode('class')
+      setIsAddOpen(false)
+    } catch (createError) {
+      setError(toMessage(createError, 'Failed to add class node.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <>
+      <section className="stack-section">
+        <SectionHeader
+          eyebrow={
+            <>
+              <GitBranch size={14} />
+              Live class tree
+            </>
+          }
+          title="Manage the class hierarchy with cleaner centered detail views."
+          description="Classes, type classes, and subclasses now live inside the same panel language as the rest of the admin dashboard."
+          action={
+            <button type="button" className="primary-button" onClick={() => setIsAddOpen(true)}>
+              <Plus size={16} />
+              Add node
+            </button>
+          }
+        />
+
+        {rootNodes.length === 0 ? (
+          <SurfaceState
+            icon={GitBranch}
+            title="No class nodes yet"
+            description="Create the first class root to start building the hierarchy."
+          />
+        ) : (
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Label</th>
+                  <th>Structure</th>
+                  <th>Inventory</th>
+                  <th>Order</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rootNodes.map((node) => {
+                  const typeNodes = getChildren(node.id)
+                  const subclassCount = typeNodes.reduce(
+                    (sum, typeNode) => sum + getChildren(typeNode.id).length,
+                    0,
+                  )
+
+                  return (
+                    <tr key={node.id} className="row-clickable" onClick={() => setExpandedClassId(node.id)}>
+                      <td>
+                        <div className="row-heading">
+                          <strong>{node.label}</strong>
+                          <span>Root class</span>
+                        </div>
+                      </td>
+                      <td>
+                        <span className="status-chip">{typeNodes.length} types</span>
+                      </td>
+                      <td>
+                        <span className="pill">{subclassCount} subclasses</span>
+                      </td>
+                      <td>
+                        <span className="pill">Sort #{node.sort_order + 1}</span>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <OverlaySurface
+        open={isAddOpen}
+        onClose={() => setIsAddOpen(false)}
+        title=""
+        description=""
+        eyebrow={null}
+        variant="modal"
+        size="md"
+      >
+        <form className="drawer-form centered-form" onSubmit={handleSubmit}>
+          <div className="class-mode-toggle" style={{ margin: '0 auto' }}>
+            <button
+              type="button"
+              className={`class-mode-toggle__item${addMode === 'class' ? ' is-active' : ''}`}
+              onClick={() => setAddMode('class')}
+            >
+              Root class
+            </button>
+            <button
+              type="button"
+              className={`class-mode-toggle__item${addMode === 'type_class' ? ' is-active' : ''}`}
+              onClick={() => setAddMode('type_class')}
+            >
+              Type class
+            </button>
+            <button
+              type="button"
+              className={`class-mode-toggle__item${addMode === 'sub_class' ? ' is-active' : ''}`}
+              onClick={() => setAddMode('sub_class')}
+            >
+              Subclass
+            </button>
+          </div>
+
+          <div className="field-group" style={{ display: 'grid', gap: '20px', width: '100%', justifyItems: 'center' }}>
+            {addMode !== 'class' ? (
+              <label className="field field--full">
+                <select
+                  value={selectedClassId}
+                  onChange={(event) => {
+                    setSelectedClassId(event.target.value)
+                    setSelectedTypeClassId('')
+                  }}
+                >
+                  <option value="">Select a root class</option>
+                  {rootNodes.map((node) => (
+                    <option key={node.id} value={node.id}>
+                      {node.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+
+            {addMode === 'sub_class' && selectedClassId ? (
+              <label className="field field--full">
+                <select
+                  value={selectedTypeClassId}
+                  onChange={(event) => setSelectedTypeClassId(event.target.value)}
+                >
+                  <option value="">Select a type class</option>
+                  {getChildren(selectedClassId).map((node) => (
+                    <option key={node.id} value={node.id}>
+                      {node.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+
+            <label className="field">
+              <input
+                type="text"
+                value={newLabel}
+                onChange={(event) => setNewLabel(event.target.value)}
+                placeholder="Enter the new node name"
+              />
+            </label>
+          </div>
+
+          {error ? (
+            <div className="inline-error" role="alert">
+              <Shield size={16} />
+              <span>{error}</span>
+            </div>
+          ) : null}
+
+          <div className="drawer-form__actions" style={{ justifyContent: 'center' }}>
+            <button type="button" className="ghost-button" onClick={() => setIsAddOpen(false)}>
+              Cancel
+            </button>
+            <button type="submit" className="primary-button" disabled={saving}>
+              {saving ? 'Saving…' : 'Create node'}
+            </button>
+          </div>
+        </form>
+      </OverlaySurface>
+
+      <OverlaySurface
+        open={expandedClassId !== null}
+        onClose={() => setExpandedClassId(null)}
+        title={nodes.find((node) => node.id === expandedClassId)?.label ?? 'Class details'}
+        description="Inspect type classes and subclasses, or delete nodes from this centered detail view."
+        eyebrow={
+          <>
+            <Layers3 size={14} />
+            Class detail
+          </>
+        }
+        variant="modal"
+        size="xl"
+        footer={
+          expandedClassId ? (
+            <button
+              type="button"
+              className="secondary-button secondary-button--warm"
+              onClick={() => {
+                void onDelete(expandedClassId)
+                setExpandedClassId(null)
+              }}
+            >
+              <Trash2 size={16} />
+              Delete class
+            </button>
+          ) : undefined
+        }
+      >
+        <div className="class-detail-grid">
+          {expandedClassId ? (
+            getChildren(expandedClassId).map((typeNode) => (
+              <article key={typeNode.id} className="table-card">
+                <div className="class-card__header">
+                  <div className="row-heading">
+                    <strong>{typeNode.label}</strong>
+                    <span>Type class</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={`Delete ${typeNode.label}`}
+                    onClick={() => void onDelete(typeNode.id)}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+
+                <div className="class-node-list">
+                  {getChildren(typeNode.id).length > 0 ? (
+                    getChildren(typeNode.id).map((subNode) => (
+                      <div key={subNode.id} className="class-node-row">
+                        <span>{subNode.label}</span>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label={`Delete ${subNode.label}`}
+                          onClick={() => void onDelete(subNode.id)}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <span className="field__help">No subclasses yet.</span>
+                  )}
+                </div>
+              </article>
+            ))
+          ) : null}
+        </div>
+      </OverlaySurface>
+    </>
+  )
 }
+
+
 
 function ButtonLink({
   label,
@@ -421,7 +743,6 @@ function SettingsView({
 }
 
 export default function Dashboard({ user: initialUser }: { user: User | null }) {
-  const navigate = useNavigate()
   const [usernameOverride, setUsernameOverride] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<Tab>('overview')
   const [searchQuery, setSearchQuery] = useState('')
@@ -439,6 +760,57 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
   const [classNodes, setClassNodes] = useState<FlatClassNode[]>([])
   const [patchnotes, setPatchnotes] = useState<Patchnote[]>([])
 
+  // Ticket state
+  const [tickets, setTickets] = useState<DnTicket[]>([])
+  const [ticketDrawerMode, setTicketDrawerMode] = useState<TicketDrawerMode>(null)
+  const [ticketDraft, setTicketDraft] = useState<TicketDraft>(createEmptyTicketDraft)
+  const [ticketErrors, setTicketErrors] = useState<Partial<Record<'ign' | 'ticket_name' | 'expiration_date' | 'submit', string>>>({})
+  const [savingTicket, setSavingTicket] = useState(false)
+  const [expandedTicketIgn, setExpandedTicketIgn] = useState<string | null>(null)
+
+  // Pet state
+  const [pets, setPets] = useState<DnPet[]>([])
+  const [petDrawerMode, setPetDrawerMode] = useState<PetDrawerMode>(null)
+  const [petDraft, setPetDraft] = useState<PetDraft>(createEmptyPetDraft)
+  const [petErrors, setPetErrors] = useState<Partial<Record<'ign' | 'expiration_date' | 'submit', string>>>({})
+  const [savingPet, setSavingPet] = useState(false)
+  const [expandedPetIgn, setExpandedPetIgn] = useState<string | null>(null)
+
+  const [users, setUsers] = useState<User[]>([])
+  const [search, setSearch] = useState('')
+  const [resetting, setResetting] = useState<string | null>(null)
+  const [passwordResult, setPasswordResult] = useState<{ username: string; password: string } | null>(null)
+  const [isComposerOpen, setIsComposerOpen] = useState(false)
+  const [patchTitle, setPatchTitle] = useState('')
+  const [patchContent, setPatchContent] = useState('')
+  const [savingPatchnote, setSavingPatchnote] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const userGrowthData = useMemo(() => monthlyTrend(users.map((entry) => entry.created_at)), [users])
+  const patchnoteActivityData = useMemo(() => monthlyTrend(patchnotes.map((entry) => entry.created_at)), [patchnotes])
+  const roleSplitData = useMemo(() => [
+    { label: 'Admins', value: users.filter((entry) => entry.is_admin).length },
+    { label: 'Users', value: users.filter((entry) => !entry.is_admin).length },
+  ], [users])
+  const classDepthData = useMemo(() => {
+    const roots = classNodes.filter((node) => node.parent_id === null)
+    const rootIds = new Set(roots.map((node) => node.id))
+    const types = classNodes.filter((node) => node.parent_id && rootIds.has(node.parent_id))
+    const typeIds = new Set(types.map((node) => node.id))
+    const subclasses = classNodes.filter((node) => node.parent_id && typeIds.has(node.parent_id))
+    return [
+      { label: 'Roots', value: roots.length },
+      { label: 'Types', value: types.length },
+      { label: 'Subclasses', value: subclasses.length },
+    ]
+  }, [classNodes])
+
+  const filteredUsers = useMemo(
+    () => users.filter((entry) => `${entry.username ?? ''} ${entry.id}`.toLowerCase().includes(search.toLowerCase())),
+    [users, search]
+  )
+
+
   const liveClassTree = useMemo(() => buildClassTree(classNodes), [classNodes])
   const rootClassOptions = liveClassTree.map((node) => node.label)
   const currentUser = initialUser
@@ -454,49 +826,31 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
   )
 
   const ticketTotal = accounts.reduce((sum, account) => sum + account.ticket, 0)
-  const completedAccounts = accounts.filter((account) => account.spam > 0).length
-
-  const heroMetrics = [
-    { label: 'Tracked accounts', value: String(accounts.length), icon: Users },
-    { label: 'Tickets in queue', value: String(ticketTotal), icon: Ticket },
-    { label: 'Cleared spam runs', value: String(completedAccounts), icon: ShieldCheck },
-  ]
-
-  const heroActions: CommandAction[] = [
-    {
-      label: 'Add account',
-      icon: Plus,
-      onClick: () => openCreateDrawer(),
-      variant: 'primary',
-    },
-    {
-      label: 'Patchnotes',
-      icon: BookOpen,
-      onClick: () => setActiveTab('patchnotes'),
-      variant: 'ghost',
-    },
-  ]
-
-  const accountGrowthData = useMemo(
-    () => monthlyTrend(accounts.map((account) => account.created_at)),
-    [accounts],
-  )
-  const accountLevelData = useMemo(() => levelBandData(accounts), [accounts])
-  const spamRatioData = useMemo(
-    () => [
-      { label: 'Finished', value: completedAccounts },
-      { label: 'Pending', value: Math.max(accounts.length - completedAccounts, 0) },
-    ],
-    [accounts.length, completedAccounts],
-  )
-  const ticketByClassData = useMemo(() => ticketTotalsByClass(accounts), [accounts])
 
   const navItems: CommandNavItem<Tab>[] = [
     { key: 'overview', label: 'Overview', icon: LayoutDashboard },
-    { key: 'accounts', label: 'Accounts', icon: Users },
+    { key: 'classes', label: 'Account', icon: Users },
+    { key: 'ticket-tab', label: 'Ticket', icon: Ticket },
+    { key: 'spam', label: 'Spam Runs', icon: ShieldCheck },
+    { key: 'calculator', label: 'Calculator', icon: Calculator },
+    { key: 'pet', label: 'Pet', icon: PawPrint },
     { key: 'patchnotes', label: 'Patchnotes', icon: BookOpen },
     { key: 'settings', label: 'Settings', icon: Settings },
   ]
+
+  if (currentUser?.is_admin) {
+    navItems.push({
+      key: 'admin-group',
+      label: 'Admin Panel',
+      icon: Shield,
+      children: [
+        { key: 'admin-overview', label: 'Admin Overview', icon: LayoutDashboard },
+        { key: 'users', label: 'Users', icon: Users },
+        { key: 'admin-patchnotes', label: 'Manage Patchnotes', icon: FileText },
+        { key: 'admin-classes', label: 'Class Tree', icon: GitBranch },
+      ],
+    })
+  }
 
   async function reloadAccounts() {
     setLoadState('loading')
@@ -521,7 +875,7 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
 
     async function loadInitialState() {
       try {
-        const [nextAccounts, nextClassNodes, nextPatchnotes] = await Promise.all([
+        const [nextAccounts, nextClassNodes, nextPatchnotes, nextTickets, nextPets] = await Promise.all([
           withTimeout(
             listDragonAccounts().then(sortAccountsNewestFirst),
             ROSTER_TIMEOUT_MS,
@@ -529,6 +883,8 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
           ),
           listClassTree(),
           listPatchnotes(),
+          listTickets(),
+          listPets(),
         ])
 
         if (cancelled) {
@@ -538,6 +894,8 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
         setAccounts(nextAccounts)
         setClassNodes(nextClassNodes)
         setPatchnotes(nextPatchnotes)
+        setTickets(nextTickets)
+        setPets(nextPets)
         setLoadState('ready')
       } catch (error) {
         if (cancelled) {
@@ -556,6 +914,26 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
     }
   }, [])
 
+  // Separate effect: load all users whenever admin status resolves.
+  // This handles the race where initialUser was null on first mount.
+  useEffect(() => {
+    if (!initialUser?.is_admin) {
+      return
+    }
+
+    let cancelled = false
+
+    listAllUsers()
+      .then((nextUsers) => {
+        if (!cancelled) setUsers(nextUsers)
+      })
+      .catch(() => { /* silently ignore — non-critical for the main dashboard */ })
+
+    return () => {
+      cancelled = true
+    }
+  }, [initialUser?.is_admin])
+
   function openCreateDrawer() {
     setDrawerMode('create')
     setEditingId(null)
@@ -570,7 +948,7 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
     setDrawerErrors({})
   }
 
-  function closeDrawer() {
+  const closeDrawer = useCallback(() => {
     if (saving) {
       return
     }
@@ -579,28 +957,28 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
     setEditingId(null)
     setDraft(createEmptyDraft())
     setDrawerErrors({})
-  }
+  }, [saving])
 
-  function updateField(
+  const updateField = useCallback((
     field: Exclude<keyof DrawerDraft, 'class_path'>,
     value: string,
-  ) {
+  ) => {
     setDraft((currentDraft) => ({ ...currentDraft, [field]: value }))
     setDrawerErrors((currentErrors) => ({
       ...currentErrors,
       [field]: undefined,
       submit: undefined,
     }))
-  }
+  }, [])
 
-  function updateClassPath(path: string[]) {
+  const updateClassPath = useCallback((path: string[]) => {
     setDraft((currentDraft) => ({ ...currentDraft, class_path: path }))
     setDrawerErrors((currentErrors) => ({
       ...currentErrors,
       class_path: undefined,
       submit: undefined,
     }))
-  }
+  }, [])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -679,8 +1057,10 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
     try {
       const savedAccount = await updateDragonAccount(editingId, data)
       setAccounts((currentAccounts) =>
-        currentAccounts.map((account) =>
-          account.id === editingId ? savedAccount : account,
+        sortAccountsNewestFirst(
+          currentAccounts.map((account) =>
+            account.id === editingId ? savedAccount : account,
+          ),
         ),
       )
       closeDrawer()
@@ -690,6 +1070,24 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
           account.id === editingId ? currentAccount : account,
         ),
       )
+      setDrawerErrors({ submit: toMessage(error) })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDeleteAccount() {
+    if (!editingId) return
+
+    const confirmed = window.confirm('Are you sure you want to delete this account? This action cannot be undone.')
+    if (!confirmed) return
+
+    setSaving(true)
+    try {
+      await deleteDragonAccount(editingId)
+      setAccounts((current) => current.filter((account) => account.id !== editingId))
+      closeDrawer()
+    } catch (error) {
       setDrawerErrors({ submit: toMessage(error) })
     } finally {
       setSaving(false)
@@ -712,28 +1110,34 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
     setPendingCounters((current) => ({ ...current, [pendingKey]: true }))
     setTableError(null)
     setAccounts((currentAccounts) =>
-      currentAccounts.map((currentAccount) =>
-        currentAccount.id === account.id
-          ? {
-              ...currentAccount,
-              [field]: nextValue,
-              updated_at: new Date().toISOString(),
-            }
-          : currentAccount,
+      sortAccountsNewestFirst(
+        currentAccounts.map((currentAccount) =>
+          currentAccount.id === account.id
+            ? {
+                ...currentAccount,
+                [field]: nextValue,
+                updated_at: new Date().toISOString(),
+              }
+            : currentAccount,
+        ),
       ),
     )
 
     try {
       const savedAccount = await updateDragonAccountCounter(account.id, field, nextValue)
       setAccounts((currentAccounts) =>
-        currentAccounts.map((currentAccount) =>
-          currentAccount.id === account.id ? savedAccount : currentAccount,
+        sortAccountsNewestFirst(
+          currentAccounts.map((currentAccount) =>
+            currentAccount.id === account.id ? savedAccount : currentAccount,
+          ),
         ),
       )
     } catch (error) {
       setAccounts((currentAccounts) =>
-        currentAccounts.map((currentAccount) =>
-          currentAccount.id === account.id ? account : currentAccount,
+        sortAccountsNewestFirst(
+          currentAccounts.map((currentAccount) =>
+            currentAccount.id === account.id ? account : currentAccount,
+          ),
         ),
       )
       setTableError(
@@ -748,6 +1152,107 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
     }
   }
 
+  async function handleToggleRole(entry: User) {
+    const nextIsAdmin = !entry.is_admin
+    setError(null)
+
+    // Optimistic update
+    setUsers((current) =>
+      current.map((u) => (u.id === entry.id ? { ...u, is_admin: nextIsAdmin } : u)),
+    )
+
+    try {
+      await toggleUserAdmin(entry.id, nextIsAdmin)
+    } catch (toggleError) {
+      // Revert on error
+      setUsers((current) =>
+        current.map((u) => (u.id === entry.id ? { ...u, is_admin: entry.is_admin } : u)),
+      )
+      setError(toMessage(toggleError, 'Failed to update user role.'))
+    }
+  }
+
+  async function handleResetPassword(entry: User) {
+    setResetting(entry.id)
+    setError(null)
+
+    try {
+      const newPassword = buildPassword()
+      await resetUserPassword(entry.id, newPassword)
+      setPasswordResult({
+        username: entry.username ?? entry.id,
+        password: newPassword,
+      })
+    } catch (resetError) {
+      setError(toMessage(resetError, 'Failed to reset password.'))
+    } finally {
+      setResetting(null)
+    }
+  }
+
+  async function handleCreatePatchnote(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (!patchTitle.trim() || !patchContent.trim()) {
+      setError('Patchnote title and content are required.')
+      return
+    }
+
+    setSavingPatchnote(true)
+    setError(null)
+
+    try {
+      const createdPatchnote = await createPatchnote(patchTitle.trim(), patchContent.trim())
+      setPatchnotes((current) => [createdPatchnote, ...current])
+      setPatchTitle('')
+      setPatchContent('')
+      setIsComposerOpen(false)
+    } catch (createError) {
+      setError(toMessage(createError, 'Failed to publish patchnote.'))
+    } finally {
+      setSavingPatchnote(false)
+    }
+  }
+
+  async function handleDeletePatchnote(id: string) {
+    try {
+      await deletePatchnote(id)
+      setPatchnotes((current) => current.filter((note) => note.id !== id))
+    } catch (deleteError) {
+      setError(toMessage(deleteError, 'Failed to delete patchnote.'))
+    }
+  }
+
+  async function handleCreateClassNode(label: string, parentId: string | null, sortOrder: number) {
+    try {
+      const createdNode = await createClassNode(label, parentId, sortOrder)
+      setClassNodes((current) => [...current, createdNode])
+    } catch (createError) {
+      setError(toMessage(createError, 'Failed to create class node.'))
+      throw createError // Re-throw for the manager to catch
+    }
+  }
+
+  async function handleDeleteClassNode(id: string) {
+    try {
+      await deleteClassNode(id)
+      const relatedIds = new Set<string>()
+
+      function collect(nodeId: string) {
+        relatedIds.add(nodeId)
+        classNodes
+          .filter((node) => node.parent_id === nodeId)
+          .forEach((child) => collect(child.id))
+      }
+
+      collect(id)
+      setClassNodes((current) => current.filter((node) => !relatedIds.has(node.id)))
+    } catch (deleteError) {
+      setError(toMessage(deleteError, 'Failed to delete class node.'))
+    }
+  }
+
+
   async function handleSignOut() {
     await getBrowserClient().auth.signOut()
   }
@@ -760,35 +1265,14 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
 
       <CommandShell
         theme="user"
-        brandInitial="D"
-        brandTitle="Dragon Nest"
+        brandIcon={<Sparkles size={24} />}
+        brandTitle="Menu"
         brandSubtitle="Account Saver"
         roleLabel={currentUser?.is_admin ? 'Admin access' : 'User access'}
         navItems={navItems}
         activeTab={activeTab}
-        onTabChange={setActiveTab}
-        heroEyebrow={
-          <>
-            <Sparkles size={14} />
-            User command deck
-          </>
-        }
-        heroTitle="Center every account, graph, and weekly task in one view."
-        heroDescription="The user dashboard now leads with live stats, cleaner account tools, responsive rows, and centered overlays that stay readable on every screen."
-        breadcrumb={['User', navItems.find((item) => item.key === activeTab)?.label ?? 'Overview']}
-        heroMetrics={heroMetrics}
-        heroActions={heroActions}
-        heroAside={<ClockCard />}
-        switchAction={
-          currentUser?.is_admin
-            ? {
-                label: 'Open admin panel',
-                icon: Shield,
-                onClick: () => navigate('/admin'),
-                variant: 'warm',
-              }
-            : undefined
-        }
+        onTabChange={(key) => setActiveTab(key as Tab)}
+        switchAction={undefined}
         onSignOut={() => void handleSignOut()}
       >
         {activeTab === 'overview' ? (
@@ -808,68 +1292,34 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
               <MetricCard
                 label="Tracked accounts"
                 value={accounts.length}
-                hint="Everything currently saved in Supabase."
+                hint=""
                 icon={Users}
               />
               <MetricCard
                 label="Max-level roster"
                 value={accounts.filter((account) => account.level >= 100).length}
-                hint="Characters at level 100 or higher."
+                hint=""
                 icon={CircleGauge}
                 accent="success"
               />
               <MetricCard
                 label="Pending spam"
                 value={accounts.filter((account) => account.spam === 0).length}
-                hint="Accounts still waiting on completion."
+                hint=""
                 icon={Database}
                 accent="warm"
               />
               <MetricCard
                 label="Total tickets"
                 value={ticketTotal}
-                hint="Combined ticket count across every account."
+                hint=""
                 icon={Ticket}
               />
-            </div>
-
-            <div className="chart-grid">
-              <ChartCard
-                eyebrow="Account growth"
-                title="New accounts over the last six months"
-                description="See when the roster expanded recently."
-              >
-                <TrendAreaChart data={accountGrowthData} />
-              </ChartCard>
-
-              <ChartCard
-                eyebrow="Level bands"
-                title="How the roster is distributed right now"
-                description="Split by early, mid, late, and capped accounts."
-              >
-                <BarChart data={accountLevelData} />
-              </ChartCard>
-
-              <ChartCard
-                eyebrow="Spam status"
-                title="Finished versus pending spam runs"
-                description="A quick ratio view for the current weekly state."
-              >
-                <DonutChart data={spamRatioData} />
-              </ChartCard>
-
-              <ChartCard
-                eyebrow="Ticket pressure"
-                title="Where tickets are concentrated by class"
-                description="Top class bases holding the most ticket volume."
-              >
-                <BarChart data={ticketByClassData} />
-              </ChartCard>
             </div>
           </section>
         ) : null}
 
-        {activeTab === 'accounts' ? (
+        {activeTab === 'classes' ? (
           <section className="stack-section">
             <SectionHeader
               eyebrow={
@@ -880,18 +1330,12 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
               }
               title="Aligned rows, fast counters, and cleaner filters."
               description="Search, filter, edit, and update accounts from one centered management surface."
-              action={
-                <button type="button" className="primary-button" onClick={openCreateDrawer}>
-                  <Plus size={16} />
-                  Add account
-                </button>
-              }
             />
 
             <section className="panel table-shell">
               <div className="section-table__toolbar">
-                <div className="toolbar-row toolbar-row__grow">
-                  <label className="field toolbar-row__grow">
+                <div className="toolbar-row toolbar-row--account">
+                  <label className="field toolbar-field toolbar-field--search">
                     <span className="field__label">Search account</span>
                     <input
                       type="text"
@@ -901,7 +1345,7 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
                     />
                   </label>
 
-                  <label className="field">
+                  <label className="field toolbar-field toolbar-field--filter">
                     <span className="field__label">Root class</span>
                     <select
                       value={filterPath[0] ?? ''}
@@ -917,21 +1361,26 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
                       ))}
                     </select>
                   </label>
-                </div>
 
-                {(filterPath.length > 0 || searchQuery) ? (
-                  <button
-                    type="button"
-                    className="ghost-button"
-                    onClick={() => {
-                      setFilterPath([])
-                      setSearchQuery('')
-                    }}
-                  >
-                    <FilterX size={16} />
-                    Clear filters
+                  <button type="button" className="primary-button toolbar-button" onClick={openCreateDrawer}>
+                    <Plus size={16} />
+                    Add account
                   </button>
-                ) : null}
+
+                  {(filterPath.length > 0 || searchQuery) ? (
+                    <button
+                      type="button"
+                      className="ghost-button toolbar-button"
+                      onClick={() => {
+                        setFilterPath([])
+                        setSearchQuery('')
+                      }}
+                    >
+                      <FilterX size={16} />
+                      Clear filters
+                    </button>
+                  ) : null}
+                </div>
               </div>
 
               {tableError ? (
@@ -994,148 +1443,706 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
 
               {loadState === 'ready' && filteredAccounts.length > 0 ? (
                 <>
-                  <div className="desktop-only">
+                  <div className="table-wrap">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Account</th>
+                          <th>Class path</th>
+                          <th style={{ width: '40px' }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredAccounts.map((account) => (
+                          <tr key={account.id} className="account-row">
+                            <td>
+                              <div className="row-heading">
+                                <strong>{account.account}</strong>
+                              </div>
+                            </td>
+                            <td>
+                              <span className="row-stack">
+                                {joinClassPath(account.class_path)}
+                              </span>
+                            </td>
+                            <td>
+                              <button
+                                type="button"
+                                className="icon-button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  openEditDrawer(account)
+                                }}
+                                aria-label={`Edit ${account.account}`}
+                              >
+                                <Pencil size={15} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : null}
+            </section>
+          </section>
+        ) : null}
+
+        {activeTab === 'calculator' ? (
+          <section className="stack-section" style={{ display: 'grid', placeItems: 'center', height: '50vh' }}>
+            <SurfaceState
+              icon={Calculator}
+              title="Under Construction"
+              description="The calculator module is currently being built. Check back soon."
+            />
+          </section>
+        ) : null}
+
+        {activeTab === 'ticket-tab' ? (
+          <section className="stack-section">
+            <SectionHeader
+              eyebrow={
+                <>
+                  <Ticket size={14} />
+                  Tickets
+                </>
+              }
+              title="Track your account tickets."
+              description="Log ticket names and expiration dates per account. Expand a row to see its tickets."
+              action={
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => {
+                    setTicketDraft(createEmptyTicketDraft())
+                    setTicketErrors({})
+                    setTicketDrawerMode('create')
+                  }}
+                >
+                  <Plus size={16} />
+                  Add new ticket
+                </button>
+              }
+            />
+
+            <section className="panel table-shell">
+              {accounts.length === 0 ? (
+                <SurfaceState
+                  icon={Ticket}
+                  title="No accounts to assign tickets"
+                  description="Create an account first to start tracking its tickets."
+                />
+              ) : (() => {
+                // Group tickets by IGN, starting with all known accounts
+                const ignGroupsMap = new Map<string, DnTicket[]>();
+                accounts.forEach(acc => ignGroupsMap.set(acc.account, []));
+                tickets.forEach(t => {
+                  if (!ignGroupsMap.has(t.ign)) {
+                    ignGroupsMap.set(t.ign, []);
+                  }
+                  ignGroupsMap.get(t.ign)!.push(t);
+                });
+                const ignGroups = Array.from(ignGroupsMap);
+                return (
+                  <>
+
                     <div className="table-wrap">
                       <table className="data-table">
-                        <thead>
-                          <tr>
-                            <th>Account</th>
-                            <th>Class path</th>
-                            <th>Level</th>
-                            <th>Spam</th>
-                            <th>Tickets</th>
-                            <th>Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filteredAccounts.map((account) => (
-                            <tr key={account.id}>
-                              <td>
-                                <div className="row-heading">
-                                  <strong>{account.account}</strong>
-                                  <span>{new Date(account.updated_at).toLocaleDateString()}</span>
-                                </div>
-                              </td>
-                              <td>
-                                <div className="row-stack">
-                                  {account.class_path.map((segment, index) => (
-                                    <span key={`${segment}-${index}`} className="pill">
-                                      {segment}
-                                    </span>
-                                  ))}
-                                </div>
-                              </td>
-                              <td>{account.level}</td>
-                              <td>
-                                <button
-                                  type="button"
-                                  className={`counter-pill__state${account.spam > 0 ? ' is-done' : ''}`}
-                                  disabled={Boolean(pendingCounters[counterKey(account.id, 'spam')])}
-                                  onClick={() =>
-                                    void handleQuickCounterChange(
-                                      account,
-                                      'spam',
-                                      account.spam > 0 ? -account.spam : 1,
-                                    )
-                                  }
-                                >
-                                  {account.spam > 0 ? 'Finished' : 'Pending'}
-                                </button>
-                              </td>
-                              <td>
-                                <div className="counter-stepper">
-                                  <button
-                                    type="button"
-                                    aria-label={`Decrease tickets for ${account.account}`}
-                                    disabled={Boolean(pendingCounters[counterKey(account.id, 'ticket')])}
-                                    onClick={() => void handleQuickCounterChange(account, 'ticket', -1)}
-                                  >
-                                    -
-                                  </button>
-                                  <strong>{account.ticket}</strong>
-                                  <button
-                                    type="button"
-                                    aria-label={`Increase tickets for ${account.account}`}
-                                    disabled={Boolean(pendingCounters[counterKey(account.id, 'ticket')])}
-                                    onClick={() => void handleQuickCounterChange(account, 'ticket', 1)}
-                                  >
-                                    +
-                                  </button>
-                                </div>
-                              </td>
-                              <td>
-                                <button
-                                  type="button"
-                                  className="ghost-button"
-                                  onClick={() => openEditDrawer(account)}
-                                >
-                                  <PencilLine size={16} />
-                                  Edit
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                      <thead>
+                        <tr>
+                          <th></th>
+                          <th>IGN / Account</th>
+                          <th>Tickets</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ignGroups.map(([ign, ignTickets]) => {
+                          const isExpanded = expandedTicketIgn === ign
+                          return (
+                            <>
+                              <tr
+                                key={ign}
+                                className={`account-row${isExpanded ? ' is-expanded' : ''}`}
+                                onClick={() => setExpandedTicketIgn(isExpanded ? null : ign)}
+                                style={{ cursor: 'pointer' }}
+                              >
+                                <td className="row-chevron-cell">
+                                  <ChevronDown
+                                    size={15}
+                                    className={`row-chevron${isExpanded ? ' is-open' : ''}`}
+                                  />
+                                </td>
+                                <td>
+                                  <div className="row-heading">
+                                    <strong>{ign}</strong>
+                                  </div>
+                                </td>
+                                <td>
+                                  <span className="status-chip">{ignTickets.length} ticket{ignTickets.length !== 1 ? 's' : ''}</span>
+                                </td>
+                              </tr>
+
+                              {isExpanded ? (
+                                <tr key={`${ign}-expand`} className="account-row-expand">
+                                  <td colSpan={3}>
+                                    <div className="row-expand-panel">
+                                      <div className="ticket-sub-table-wrap">
+                                        <table className="data-table data-table--nested">
+                                          <thead>
+                                            <tr>
+                                              <th>Name of ticket</th>
+                                              <th>Expiration date</th>
+                                              <th></th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {ignTickets.map((t) => (
+                                              <tr key={t.id} className={isNearExpiration(t.expiration_date) ? 'row--expiring' : ''}>
+                                                <td>
+                                                  <div className="row-heading">
+                                                    <strong>{t.ticket_name}</strong>
+                                                  </div>
+                                                </td>
+                                                <td>
+                                                  <span className={`status-chip${new Date(t.expiration_date) < new Date() ? ' status-chip--warm' : ''}`}>
+                                                    {new Date(t.expiration_date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                                                  </span>
+                                                </td>
+                                                <td>
+                                                  <button
+                                                    type="button"
+                                                    className="icon-button"
+                                                    aria-label={`Delete ${t.ticket_name}`}
+                                                    onClick={(e) => {
+                                                      e.stopPropagation()
+                                                      void deleteTicket(t.id).then(() =>
+                                                        setTickets((cur) => cur.filter((x) => x.id !== t.id))
+                                                      ).catch((err) => setError(toMessage(err)))
+                                                    }}
+                                                  >
+                                                    <Trash2 size={14} />
+                                                  </button>
+                                                </td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ) : null}
+                            </>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  </>
+                )
+              })()}
+            </section>
+
+            {/* Add ticket drawer */}
+            <OverlaySurface
+              open={ticketDrawerMode === 'create'}
+              onClose={() => setTicketDrawerMode(null)}
+              title="Add new ticket"
+              description="Record a ticket for one of your accounts."
+              eyebrow={
+                <>
+                  <Ticket size={14} />
+                  New ticket
+                </>
+              }
+              variant="drawer"
+              size="sm"
+            >
+              <form
+                className="drawer-form"
+                onSubmit={async (e) => {
+                  e.preventDefault()
+                  const errs: typeof ticketErrors = {}
+                  if (!ticketDraft.ign.trim()) errs.ign = 'IGN is required.'
+                  if (!ticketDraft.ticket_name.trim()) errs.ticket_name = 'Ticket name is required.'
+                  if (!ticketDraft.expiration_date) errs.expiration_date = 'Expiration date is required.'
+                  if (Object.keys(errs).length > 0) { setTicketErrors(errs); return }
+                  setSavingTicket(true)
+                  try {
+                    const saved = await createTicket(
+                      ticketDraft.ign.trim(),
+                      ticketDraft.ticket_name.trim(),
+                      ticketDraft.expiration_date,
+                    )
+                    setTickets((cur) => [saved, ...cur])
+                    setTicketDrawerMode(null)
+                    setTicketDraft(createEmptyTicketDraft())
+                  } catch (err) {
+                    setTicketErrors({ submit: toMessage(err) })
+                  } finally {
+                    setSavingTicket(false)
+                  }
+                }}
+              >
+                <label className="field">
+                  <span className="field__label">IGN / Account</span>
+                  <input
+                    type="text"
+                    list={ticketDraft.ign.trim().length > 0 ? "account-suggestions" : undefined}
+                    value={ticketDraft.ign}
+                    onChange={(e) => setTicketDraft((d) => ({ ...d, ign: e.target.value }))}
+                    placeholder="Enter or select an account"
+                    disabled={savingTicket}
+                  />
+                  <datalist id="account-suggestions">
+                    {ticketDraft.ign.trim().length > 0 && accounts.map((acc) => (
+                      <option key={acc.id} value={acc.account} />
+                    ))}
+                  </datalist>
+                  {ticketErrors.ign ? <span className="field__error">{ticketErrors.ign}</span> : null}
+                </label>
+
+                <label className="field">
+                  <span className="field__label">Name of ticket</span>
+                  <input
+                    type="text"
+                    value={ticketDraft.ticket_name}
+                    onChange={(e) => setTicketDraft((d) => ({ ...d, ticket_name: e.target.value }))}
+                    placeholder="e.g. Dragon Jewel, Nest Pass"
+                    disabled={savingTicket}
+                  />
+                  {ticketErrors.ticket_name ? <span className="field__error">{ticketErrors.ticket_name}</span> : null}
+                </label>
+
+                <label className="field">
+                  <span className="field__label">Expiration date</span>
+                  <input
+                    type="date"
+                    value={ticketDraft.expiration_date}
+                    onChange={(e) => setTicketDraft((d) => ({ ...d, expiration_date: e.target.value }))}
+                    disabled={savingTicket}
+                  />
+                  {ticketErrors.expiration_date ? <span className="field__error">{ticketErrors.expiration_date}</span> : null}
+                </label>
+
+                {ticketErrors.submit ? (
+                  <div className="inline-error" role="alert">
+                    <Shield size={16} />
+                    <span>{ticketErrors.submit}</span>
+                  </div>
+                ) : null}
+
+                <footer className="drawer-form__footer">
+                  <div className="drawer-form__footer-group">
+                    <div className="drawer-form__actions">
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() => setTicketDrawerMode(null)}
+                        disabled={savingTicket}
+                      >
+                        Cancel
+                      </button>
+                      <button type="submit" className="primary-button" disabled={savingTicket}>
+                        {savingTicket ? 'Saving…' : 'Add ticket'}
+                      </button>
                     </div>
+                  </div>
+                </footer>
+              </form>
+            </OverlaySurface>
+          </section>
+        ) : null}
+
+        {activeTab === 'pet' ? (
+          <section className="stack-section">
+            <SectionHeader
+              eyebrow={
+                <>
+                  <PawPrint size={14} />
+                  Pet Management
+                </>
+              }
+              title="Manage your pets' expiration dates."
+              description="Keep track of your pets and renew them before they expire."
+              action={
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    setPetDraft(createEmptyPetDraft())
+                    setPetErrors({})
+                    setPetDrawerMode('create')
+                  }}
+                >
+                  <Plus size={16} />
+                  Add new pet
+                </button>
+              }
+            />
+
+            <section className="panel table-shell">
+              {accounts.length === 0 ? (
+                <SurfaceState
+                  icon={PawPrint}
+                  title="No accounts to assign pets"
+                  description="Create an account first to start tracking its pets."
+                />
+              ) : (() => {
+                const ignGroupsMap = new Map<string, DnPet[]>();
+                accounts.forEach(acc => ignGroupsMap.set(acc.account, []));
+                pets.forEach(p => {
+                  if (!ignGroupsMap.has(p.ign)) {
+                    ignGroupsMap.set(p.ign, []);
+                  }
+                  ignGroupsMap.get(p.ign)!.push(p);
+                });
+                const ignGroups = Array.from(ignGroupsMap);
+                return (
+                  <>
+                    <div className="table-wrap">
+                      <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th></th>
+                          <th>IGN / Account</th>
+                          <th>Pets</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ignGroups.map(([ign, ignPets]) => {
+                          const isExpanded = expandedPetIgn === ign
+                          return (
+                            <Fragment key={ign}>
+                              <tr
+                                className={`account-row${isExpanded ? ' is-expanded' : ''}`}
+                                onClick={() => setExpandedPetIgn(isExpanded ? null : ign)}
+                                style={{ cursor: 'pointer' }}
+                              >
+                                <td className="row-chevron-cell">
+                                  <ChevronDown
+                                    size={15}
+                                    className={`row-chevron${isExpanded ? ' is-open' : ''}`}
+                                  />
+                                </td>
+                                <td>
+                                  <div className="row-heading">
+                                    <strong>{ign}</strong>
+                                  </div>
+                                </td>
+                                <td>
+                                  <span className="status-chip">{ignPets.length} pet{ignPets.length !== 1 ? 's' : ''}</span>
+                                </td>
+                              </tr>
+
+                              {isExpanded ? (
+                                <tr className="account-row-expand">
+                                  <td colSpan={3}>
+                                    <div className="row-expand-panel">
+                                      <div className="ticket-sub-table-wrap">
+                                        <table className="data-table data-table--nested">
+                                          <thead>
+                                            <tr>
+                                              <th>Expiration date</th>
+                                              <th></th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {ignPets.map((p) => (
+                                              <tr key={p.id} className={isNearExpiration(p.expiration_date) ? 'row--expiring' : ''}>
+                                                <td>
+                                                  <span className={`status-chip${new Date(p.expiration_date) < new Date() ? ' status-chip--warm' : ''}`}>
+                                                    {new Date(p.expiration_date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                                                  </span>
+                                                </td>
+                                                <td>
+                                                  <button
+                                                    type="button"
+                                                    className="icon-button"
+                                                    aria-label={`Delete pet`}
+                                                    onClick={(e) => {
+                                                      e.stopPropagation()
+                                                      void deletePet(p.id).then(() =>
+                                                        setPets((cur) => cur.filter((x) => x.id !== p.id))
+                                                      ).catch((err) => setError(toMessage(err)))
+                                                    }}
+                                                  >
+                                                    <Trash2 size={14} />
+                                                  </button>
+                                                </td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ) : null}
+                            </Fragment>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  </>
+                )
+              })()}
+            </section>
+
+            <OverlaySurface
+              open={petDrawerMode === 'create'}
+              onClose={() => setPetDrawerMode(null)}
+              title="Add new pet"
+              description="Record a pet for one of your accounts."
+              eyebrow={
+                <>
+                  <PawPrint size={14} />
+                  New pet
+                </>
+              }
+              variant="drawer"
+              size="sm"
+            >
+              <form
+                className="drawer-form"
+                onSubmit={async (e) => {
+                  e.preventDefault()
+                  const errs: typeof petErrors = {}
+                  if (!petDraft.ign.trim()) errs.ign = 'IGN is required.'
+                  if (!petDraft.expiration_date) errs.expiration_date = 'Expiration date is required.'
+                  if (Object.keys(errs).length > 0) { setPetErrors(errs); return }
+                  setSavingPet(true)
+                  try {
+                    const saved = await createPet(
+                      petDraft.ign.trim(),
+                      petDraft.expiration_date,
+                    )
+                    setPets((cur) => [saved, ...cur])
+                    setPetDrawerMode(null)
+                    setPetDraft(createEmptyPetDraft())
+                  } catch (err) {
+                    setPetErrors({ submit: toMessage(err) })
+                  } finally {
+                    setSavingPet(false)
+                  }
+                }}
+              >
+                <label className="field">
+                  <span className="field__label">IGN / Account</span>
+                  <input
+                    type="text"
+                    list={petDraft.ign.trim().length > 0 ? "account-suggestions-pet" : undefined}
+                    value={petDraft.ign}
+                    onChange={(e) => setPetDraft((d) => ({ ...d, ign: e.target.value }))}
+                    placeholder="Enter or select an account"
+                    disabled={savingPet}
+                  />
+                  <datalist id="account-suggestions-pet">
+                    {petDraft.ign.trim().length > 0 && accounts.map((acc) => (
+                      <option key={acc.id} value={acc.account} />
+                    ))}
+                  </datalist>
+                  {petErrors.ign ? <span className="field__error">{petErrors.ign}</span> : null}
+                </label>
+
+                <label className="field">
+                  <span className="field__label">Expiration date</span>
+                  <input
+                    type="date"
+                    value={petDraft.expiration_date}
+                    onChange={(e) => setPetDraft((d) => ({ ...d, expiration_date: e.target.value }))}
+                    disabled={savingPet}
+                  />
+                  {petErrors.expiration_date ? <span className="field__error">{petErrors.expiration_date}</span> : null}
+                </label>
+
+                {petErrors.submit ? (
+                  <div className="inline-error" role="alert">
+                    <Shield size={16} />
+                    <span>{petErrors.submit}</span>
+                  </div>
+                ) : null}
+
+                <footer className="drawer-form__footer">
+                  <div className="drawer-form__footer-group">
+                    <div className="drawer-form__actions">
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() => setPetDrawerMode(null)}
+                        disabled={savingPet}
+                      >
+                        Cancel
+                      </button>
+                      <button type="submit" className="primary-button" disabled={savingPet}>
+                        {savingPet ? 'Saving…' : 'Add pet'}
+                      </button>
+                    </div>
+                  </div>
+                </footer>
+              </form>
+            </OverlaySurface>
+          </section>
+        ) : null}
+
+        {activeTab === 'spam' ? (
+          <section className="stack-section">
+            <SectionHeader
+              eyebrow={
+                <>
+                  <ShieldCheck size={14} />
+                  Spam Runs
+                </>
+              }
+              title="Track your daily spam runs."
+              description="Quickly mark accounts as done or pending for the day."
+            />
+
+            <section className="panel table-shell">
+              <div className="section-table__toolbar">
+                <div className="toolbar-row toolbar-row--account">
+                  <label className="field toolbar-field toolbar-field--search">
+                    <span className="field__label">Search account</span>
+                    <input
+                      type="text"
+                      placeholder="Search by account name"
+                      value={searchQuery}
+                      onChange={(event) => setSearchQuery(event.target.value)}
+                    />
+                  </label>
+                  {(searchQuery) ? (
+                    <button
+                      type="button"
+                      className="ghost-button toolbar-button"
+                      onClick={() => setSearchQuery('')}
+                    >
+                      <FilterX size={16} />
+                      Clear filters
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              {tableError ? (
+                <div className="inline-error" role="alert">
+                  <Shield size={16} />
+                  <span>{tableError}</span>
+                </div>
+              ) : null}
+
+              {loadState === 'loading' ? (
+                <SurfaceState
+                  icon={RefreshCcw}
+                  title="Loading the roster"
+                  description="Pulling the latest Dragon Nest accounts from Supabase."
+                />
+              ) : null}
+
+              {loadState === 'error' && loadError ? (
+                <SurfaceState
+                  icon={Shield}
+                  title="The roster could not be loaded"
+                  description={loadError}
+                  tone="danger"
+                  action={
+                    <button type="button" className="ghost-button" onClick={() => void reloadAccounts()}>
+                      <RefreshCcw size={16} />
+                      Retry
+                    </button>
+                  }
+                />
+              ) : null}
+
+              {loadState === 'ready' && filteredAccounts.length === 0 ? (
+                <SurfaceState
+                  icon={ShieldCheck}
+                  title={accounts.length === 0 ? 'No accounts saved yet' : 'No accounts match the search'}
+                  description={
+                    accounts.length === 0
+                      ? 'Create an account in the Accounts tab to start tracking spam runs.'
+                      : 'Clear the search query to see your accounts.'
+                  }
+                  action={
+                    accounts.length > 0 ? (
+                      <ButtonLink
+                        label="Clear filters"
+                        onClick={() => setSearchQuery('')}
+                      />
+                    ) : undefined
+                  }
+                />
+              ) : null}
+
+              {loadState === 'ready' && filteredAccounts.length > 0 ? (
+                <>
+                  <div className="table-wrap">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Account</th>
+                          <th>Spam Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredAccounts.map((account) => (
+                          <tr key={account.id} className="account-row">
+                            <td>
+                              <div className="row-heading">
+                                <strong>{account.account}</strong>
+                              </div>
+                            </td>
+                            <td>
+                              <button
+                                type="button"
+                                className={`counter-pill__state${account.spam > 0 ? ' is-done' : ''}`}
+                                disabled={Boolean(pendingCounters[counterKey(account.id, 'spam')])}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  void handleQuickCounterChange(
+                                    account,
+                                    'spam',
+                                    account.spam > 0 ? -account.spam : 1,
+                                  )
+                                }}
+                                style={{ margin: 0 }}
+                              >
+                                {account.spam > 0 ? '✓ Finished' : 'Mark done'}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
 
                   <div className="mobile-only data-card-grid">
                     {filteredAccounts.map((account) => (
-                      <article key={account.id} className="account-card">
+                      <article key={account.id} className="table-card">
                         <div className="table-card__header">
                           <div className="row-heading">
                             <strong>{account.account}</strong>
-                            <span>{joinClassPath(account.class_path)}</span>
                           </div>
-                          <span className="status-chip">{account.level}</span>
                         </div>
-
-                        <div className="table-card__stats">
+                        <div className="table-card__meta">
                           <button
                             type="button"
                             className={`counter-pill__state${account.spam > 0 ? ' is-done' : ''}`}
                             disabled={Boolean(pendingCounters[counterKey(account.id, 'spam')])}
-                            onClick={() =>
+                            onClick={(e) => {
+                              e.stopPropagation()
                               void handleQuickCounterChange(
                                 account,
                                 'spam',
                                 account.spam > 0 ? -account.spam : 1,
                               )
-                            }
+                            }}
+                            style={{ margin: 0, width: '100%', justifyContent: 'center' }}
                           >
-                            {account.spam > 0 ? 'Finished' : 'Pending'}
+                            {account.spam > 0 ? '✓ Finished' : 'Mark done'}
                           </button>
-
-                          <div className="counter-stepper">
-                            <button
-                              type="button"
-                              aria-label={`Decrease tickets for ${account.account}`}
-                              disabled={Boolean(pendingCounters[counterKey(account.id, 'ticket')])}
-                              onClick={() => void handleQuickCounterChange(account, 'ticket', -1)}
-                            >
-                              -
-                            </button>
-                            <strong>{account.ticket}</strong>
-                            <button
-                              type="button"
-                              aria-label={`Increase tickets for ${account.account}`}
-                              disabled={Boolean(pendingCounters[counterKey(account.id, 'ticket')])}
-                              onClick={() => void handleQuickCounterChange(account, 'ticket', 1)}
-                            >
-                              +
-                            </button>
-                          </div>
                         </div>
-
-                        <button
-                          type="button"
-                          className="account-card__action ghost-button"
-                          onClick={() => openEditDrawer(account)}
-                        >
-                          <PencilLine size={16} />
-                          Edit account
-                        </button>
                       </article>
                     ))}
                   </div>
@@ -1161,7 +2168,231 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
           />
         ) : null}
 
-        {activeTab === 'settings' ? (
+        {activeTab === 'pet' ? (
+          <section className="stack-section">
+            <SectionHeader
+              eyebrow={
+                <>
+                  <PawPrint size={14} />
+                  Pet
+                </>
+              }
+              title="Your Dragon Nest companions."
+              description="Track and manage your in-game pets from one place. Pet management features are coming soon."
+            />
+            <div className="panel" style={{ padding: '48px 32px', textAlign: 'center', display: 'grid', gap: '16px', justifyItems: 'center' }}>
+              <span style={{ fontSize: '3rem' }}>🐾</span>
+              <h3 style={{ color: 'var(--text-strong)', fontFamily: 'var(--font-display)', fontSize: '1.2rem', fontWeight: 700, margin: 0 }}>Pet tracker coming soon</h3>
+              <p style={{ color: 'var(--text-muted)', maxWidth: '40ch', margin: 0 }}>This section will let you track your pets, equipment, and buffs per account.</p>
+            </div>
+          </section>
+        ) : null}
+
+{activeTab === 'admin-overview' ? (
+          <section className="stack-section">
+            <SectionHeader
+              eyebrow={
+                <>
+                  <LayoutDashboard size={14} />
+                  Overview
+                </>
+              }
+              title="A cleaner admin snapshot across the whole system."
+              description="Review user growth, role split, publishing cadence, and class-tree depth without leaving the centered shell."
+            />
+
+            <div className="metric-grid">
+              <MetricCard
+                label="Total users"
+                value={users.length}
+                hint="All registered Dragon Nest users."
+                icon={Users}
+                accent="warm"
+              />
+              <MetricCard
+                label="Admins"
+                value={users.filter((entry) => entry.is_admin).length}
+                hint="Accounts with elevated access."
+                icon={Shield}
+                accent="warm"
+              />
+              <MetricCard
+                label="Patchnotes"
+                value={patchnotes.length}
+                hint="Published update logs."
+                icon={FileText}
+              />
+              <MetricCard
+                label="Class roots"
+                value={liveClassTree.length}
+                hint="Top-level class families."
+                icon={GitBranch}
+              />
+            </div>
+
+            <div className="chart-grid">
+              <ChartCard
+                eyebrow="User growth"
+                title="Recent registrations"
+                description="New user accounts created over the last six months."
+              >
+                <TrendAreaChart data={userGrowthData} accent="#ffb16f" />
+              </ChartCard>
+
+              <ChartCard
+                eyebrow="Role split"
+                title="Admin versus user ratio"
+                description="Monitor access distribution across the system."
+              >
+                <DonutChart data={roleSplitData} accent="warm" />
+              </ChartCard>
+
+              <ChartCard
+                eyebrow="Publishing rhythm"
+                title="Patchnotes over the last six months"
+                description="See when communication volume has changed."
+              >
+                <TrendAreaChart data={patchnoteActivityData} accent="#ffd39a" />
+              </ChartCard>
+
+              <ChartCard
+                eyebrow="Class hierarchy"
+                title="Depth distribution"
+                description="Track how many nodes exist at each tree level."
+              >
+                <BarChart data={classDepthData} accent="warm" />
+              </ChartCard>
+            </div>
+          </section>
+        ) : null}
+
+        {activeTab === 'users' ? (
+          <section className="stack-section">
+            <SectionHeader
+              eyebrow={
+                <>
+                  <Users size={14} />
+                  User management
+                </>
+              }
+              title="Aligned rows and centered password reset feedback."
+              description="Search users, inspect joined dates, and reset passwords from a cleaner management surface."
+            />
+
+            <section className="panel table-shell">
+              <div className="section-table__toolbar">
+                <label className="field toolbar-row__grow">
+                  <span className="field__label">Search users</span>
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Search by username or user ID"
+                  />
+                </label>
+              </div>
+
+              {filteredUsers.length === 0 ? (
+                <SurfaceState
+                  icon={Users}
+                  title="No users matched the current search"
+                  description="Try a different username or clear the current filter."
+                />
+              ) : (
+                <>
+                  <div className="table-wrap">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>User</th>
+                          <th>Role</th>
+                          <th>Joined</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredUsers.map((entry) => (
+                          <tr key={entry.id}>
+                            <td>
+                              <div className="row-heading">
+                                <strong>{entry.username ?? 'Unnamed user'}</strong>
+                                <span>{entry.id}</span>
+                              </div>
+                            </td>
+                            <td>
+                              <button
+                                type="button"
+                                className={`status-chip${entry.is_admin ? ' status-chip--warm' : ''}`}
+                                onClick={() => void handleToggleRole(entry)}
+                                title={`Click to make ${entry.is_admin ? 'User' : 'Admin'}`}
+                                disabled={entry.id === currentUser?.id} // Don't allow self-demotion
+                              >
+                                {entry.is_admin ? 'Admin' : 'User'}
+                              </button>
+                            </td>
+                            <td>{new Date(entry.created_at).toLocaleDateString()}</td>
+                            <td>
+                              <button
+                                type="button"
+                                className="ghost-button"
+                                disabled={resetting === entry.id}
+                                onClick={() => void handleResetPassword(entry)}
+                              >
+                                <KeyRound size={16} />
+                                {resetting === entry.id ? 'Resetting…' : 'Reset password'}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </section>
+          </section>
+        ) : null}
+
+        {activeTab === 'admin-patchnotes' ? (
+          <PatchnoteDeck
+            patchnotes={patchnotes}
+            eyebrow={
+              <>
+                <FileText size={14} />
+                Patchnote control
+              </>
+            }
+            title="Publish and review patchnotes from the same shell."
+            description="Create update logs, inspect details, and delete entries from centered overlays."
+            actions={
+              <button type="button" className="primary-button" onClick={() => setIsComposerOpen(true)}>
+                <Plus size={16} />
+                Publish note
+              </button>
+            }
+            emptyTitle="No patchnotes published yet"
+            emptyDescription="Create the first patchnote to start the update timeline."
+            detailActions={(note) => (
+              <button
+                type="button"
+                className="secondary-button secondary-button--warm"
+                onClick={() => void handleDeletePatchnote(note.id)}
+              >
+                <Trash2 size={16} />
+                Delete patchnote
+              </button>
+            )}
+          />
+        ) : null}
+
+        {activeTab === 'admin-classes' ? (
+          <ClassTreeManager
+            nodes={classNodes}
+            onCreate={handleCreateClassNode}
+            onDelete={handleDeleteClassNode}
+          />
+        ) : null}
+              {activeTab === 'settings' ? (
           <SettingsView
             user={currentUser}
             onUsernameUpdate={setUsernameOverride}
@@ -1180,7 +2411,88 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
         onSubmit={handleSubmit}
         onFieldChange={updateField}
         onClassPathChange={updateClassPath}
+        onDelete={handleDeleteAccount}
       />
+
+      <OverlaySurface
+        open={passwordResult !== null}
+        onClose={() => setPasswordResult(null)}
+        title="Password reset complete"
+        description="Copy the generated password and share it through your secure admin workflow."
+        eyebrow={
+          <>
+            <KeyRound size={14} />
+            User reset result
+          </>
+        }
+        variant="modal"
+        size="md"
+      >
+        <div className="form-panel">
+          <div className="row-heading">
+            <strong>{passwordResult?.username}</strong>
+            <span>Generated password</span>
+          </div>
+          <div className="panel form-panel">
+            <code>{passwordResult?.password}</code>
+          </div>
+        </div>
+      </OverlaySurface>
+
+      <OverlaySurface
+        open={isComposerOpen}
+        onClose={() => setIsComposerOpen(false)}
+        title="Publish patchnote"
+        description="Create a new update entry for every user dashboard."
+        eyebrow={
+          <>
+            <BookOpen size={14} />
+            Publish update
+          </>
+        }
+        variant="drawer"
+        size="lg"
+      >
+        <form className="drawer-form" onSubmit={handleCreatePatchnote}>
+          <label className="field">
+            <span className="field__label">Patchnote title</span>
+            <input
+              type="text"
+              value={patchTitle}
+              onChange={(event) => setPatchTitle(event.target.value)}
+              placeholder="Version or headline"
+            />
+          </label>
+
+          <label className="field">
+            <span className="field__label">Patchnote content</span>
+            <textarea
+              value={patchContent}
+              onChange={(event) => setPatchContent(event.target.value)}
+              placeholder="Write the patch details..."
+              rows={8}
+            />
+          </label>
+
+          <div className="drawer-form__actions">
+            <button type="button" className="ghost-button" onClick={() => setIsComposerOpen(false)}>
+              Cancel
+            </button>
+            <button type="submit" className="primary-button" disabled={savingPatchnote}>
+              {savingPatchnote ? 'Publishing…' : 'Publish note'}
+            </button>
+          </div>
+        </form>
+      </OverlaySurface>
+
+      {error ? (
+        <ToastNotification
+          message="Action failed"
+          subText={error}
+          tone="danger"
+          onClose={() => setError(null)}
+        />
+      ) : null}
 
       {loadError ? (
         <ToastNotification

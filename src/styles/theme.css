@@ -1,30 +1,28 @@
 :root {
-  --bg-canvas: #030712;
-  --bg-panel: rgba(10, 17, 32, 0.82);
-  --bg-panel-strong: rgba(7, 13, 26, 0.96);
-  --bg-soft: rgba(255, 255, 255, 0.04);
-  --bg-muted: rgba(255, 255, 255, 0.02);
-  --border-soft: rgba(143, 181, 255, 0.12);
-  --border-strong: rgba(114, 221, 255, 0.26);
-  --border-warm: rgba(255, 177, 111, 0.26);
-  --text-strong: #f5f8ff;
-  --text-muted: #a6b2ca;
-  --text-dim: #7384a1;
-  --accent: #72ddff;
-  --accent-strong: #97ffd7;
-  --accent-warm: #ffb16f;
-  --accent-rose: #ff7f9f;
-  --success: #67d7a2;
-  --danger: #ff8ea4;
-  --shadow-panel:
-    0 28px 100px rgba(0, 0, 0, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  --shadow-glow: 0 0 0 1px rgba(114, 221, 255, 0.14), 0 18px 42px rgba(114, 221, 255, 0.08);
-  --font-body: 'Rajdhani', 'Segoe UI', sans-serif;
-  --font-display: 'Orbitron', 'Trebuchet MS', sans-serif;
-  --font-mono: 'IBM Plex Mono', 'SFMono-Regular', monospace;
+  --bg-canvas: #F8FAFC;
+  --bg-panel: #FFFFFF;
+  --bg-panel-strong: #F1F5F9;
+  --bg-soft: rgba(0, 0, 0, 0.04);
+  --bg-muted: rgba(0, 0, 0, 0.02);
+  --border-soft: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.16);
+  --border-warm: rgba(0, 0, 0, 0.16);
+  --text-strong: #0F172A;
+  --text-muted: #475569;
+  --text-dim: #64748B;
+  --accent: #3B82F6;
+  --accent-strong: #2563EB;
+  --accent-warm: #F59E0B;
+  --accent-rose: #EC4899;
+  --success: #10B981;
+  --danger: #EF4444;
+  --shadow-panel: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  --shadow-glow: 0 4px 12px rgba(59, 130, 246, 0.1);
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
   --page-width: min(1280px, calc(100vw - 40px));
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 *,
@@ -43,36 +41,11 @@ body {
   margin: 0;
   font-family: var(--font-body);
   color: var(--text-muted);
-  background:
-    radial-gradient(circle at top left, rgba(114, 221, 255, 0.12), transparent 28%),
-    radial-gradient(circle at top right, rgba(255, 177, 111, 0.08), transparent 22%),
-    linear-gradient(180deg, #07101d 0%, var(--bg-canvas) 100%);
+  background: var(--bg-canvas);
   line-height: 1.5;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
-
-body::before,
-body::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-}
-
-body::before {
-  background-image:
-    linear-gradient(rgba(166, 178, 202, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(166, 178, 202, 0.05) 1px, transparent 1px);
-  background-size: 48px 48px;
-  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.45), transparent 74%);
-}
-
-body::after {
-  background:
-    radial-gradient(circle at 18% 18%, rgba(114, 221, 255, 0.08), transparent 17%),
-    radial-gradient(circle at 85% 14%, rgba(151, 255, 215, 0.08), transparent 14%);
 }
 
 #root {
@@ -109,6 +82,7 @@ h3,
 h4,
 p {
   margin: 0;
+  font-weight: 500;
 }
 
 a {
@@ -140,25 +114,12 @@ code {
 }
 
 .app-loading__orb {
-  width: 74px;
-  height: 74px;
+  width: 50px;
+  height: 50px;
   border-radius: 999px;
-  border: 1px solid rgba(114, 221, 255, 0.22);
-  background:
-    radial-gradient(circle at 30% 30%, rgba(151, 255, 215, 0.32), transparent 38%),
-    rgba(255, 255, 255, 0.04);
-  box-shadow: var(--shadow-glow);
-  position: relative;
-}
-
-.app-loading__orb::after {
-  content: '';
-  position: absolute;
-  inset: 12px;
-  border-radius: inherit;
-  border: 2px solid transparent;
+  border: 2px solid var(--border-soft);
   border-top-color: var(--accent);
-  animation: spin 1.15s linear infinite;
+  animation: spin 1s linear infinite;
 }
 
 @keyframes spin {

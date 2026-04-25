@@ -37,6 +37,23 @@ export type Patchnote = {
   updated_at: string
 }
 
+export type DnTicket = {
+  id: string
+  user_id: string
+  ign: string
+  ticket_name: string
+  expiration_date: string
+  created_at: string
+}
+
+export type DnPet = {
+  id: string
+  user_id: string
+  ign: string
+  expiration_date: string
+  created_at: string
+}
+
 export type User = {
   id: string
   username: string | null
@@ -76,6 +93,18 @@ type Database = {
         Row: Patchnote
         Insert: { title: string; content: string }
         Update: Partial<Pick<Patchnote, 'title' | 'content'>>
+        Relationships: []
+      }
+      tickets: {
+        Row: DnTicket
+        Insert: { user_id?: string; ign: string; ticket_name: string; expiration_date: string }
+        Update: Partial<Pick<DnTicket, 'user_id' | 'ign' | 'ticket_name' | 'expiration_date'>>
+        Relationships: []
+      }
+      pets: {
+        Row: DnPet
+        Insert: { user_id?: string; ign: string; expiration_date: string }
+        Update: Partial<Pick<DnPet, 'user_id' | 'ign' | 'expiration_date'>>
         Relationships: []
       }
       users: {
@@ -204,6 +233,12 @@ export async function updateDragonAccountCounter(
   return data
 }
 
+export async function deleteDragonAccount(id: string): Promise<void> {
+  const client = getBrowserClient()
+  const { error } = await client.from('dragon_accounts').delete().eq('id', id)
+  if (error) throw error
+}
+
 // ─── Class Tree ───────────────────────────────────────────────────────────────
 
 export async function listClassTree(): Promise<ClassNode[]> {
@@ -269,6 +304,90 @@ export async function deletePatchnote(id: string): Promise<void> {
   if (error) throw error
 }
 
+// ─── Tickets ──────────────────────────────────────────────────────────────────
+
+export async function listTickets(): Promise<DnTicket[]> {
+  const client = getBrowserClient()
+  const { data, error } = await client
+    .from('tickets')
+    .select('*')
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data
+}
+
+export async function createTicket(
+  ign: string,
+  ticket_name: string,
+  expiration_date: string,
+): Promise<DnTicket> {
+  const client = getBrowserClient()
+  const { data: authData, error: authError } = await client.auth.getUser()
+  if (authError || !authData.user) {
+    throw new Error('You must be logged in to create a ticket.')
+  }
+
+  const { data, error } = await client
+    .from('tickets')
+    .insert({
+      user_id: authData.user.id,
+      ign,
+      ticket_name,
+      expiration_date,
+    })
+    .select('*')
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function deleteTicket(id: string): Promise<void> {
+  const client = getBrowserClient()
+  const { error } = await client.from('tickets').delete().eq('id', id)
+  if (error) throw error
+}
+
+// ─── Pets ─────────────────────────────────────────────────────────────────────
+
+export async function listPets(): Promise<DnPet[]> {
+  const client = getBrowserClient()
+  const { data, error } = await client
+    .from('pets')
+    .select('*')
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data
+}
+
+export async function createPet(
+  ign: string,
+  expiration_date: string,
+): Promise<DnPet> {
+  const client = getBrowserClient()
+  const { data: authData, error: authError } = await client.auth.getUser()
+  if (authError || !authData.user) {
+    throw new Error('You must be logged in to create a pet.')
+  }
+
+  const { data, error } = await client
+    .from('pets')
+    .insert({
+      user_id: authData.user.id,
+      ign,
+      expiration_date,
+    })
+    .select('*')
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function deletePet(id: string): Promise<void> {
+  const client = getBrowserClient()
+  const { error } = await client.from('pets').delete().eq('id', id)
+  if (error) throw error
+}
+
 // ─── Admin: User Management ───────────────────────────────────────────────────
 
 export async function listAllUsers(): Promise<User[]> {
@@ -290,6 +409,15 @@ export async function resetUserPassword(
     user_id: userId,
     new_password: newPassword,
   })
+  if (error) throw error
+}
+
+export async function toggleUserAdmin(userId: string, isAdmin: boolean): Promise<void> {
+  const client = getBrowserClient()
+  const { error } = await client
+    .from('users')
+    .update({ is_admin: isAdmin })
+    .eq('id', userId)
   if (error) throw error
 }
 

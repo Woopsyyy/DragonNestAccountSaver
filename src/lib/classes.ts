@@ -251,17 +251,17 @@ export function flattenClassPaths(
   })
 }
 
-type CreatedRecord = {
-  created_at: string
+type UpdatedRecord = {
+  updated_at: string
 }
 
 type PathRecord = {
   class_path: string[]
 }
 
-export function sortAccountsNewestFirst<T extends CreatedRecord>(accounts: T[]): T[] {
+export function sortAccountsNewestFirst<T extends UpdatedRecord>(accounts: T[]): T[] {
   return [...accounts].sort((left, right) => {
-    return new Date(right.created_at).getTime() - new Date(left.created_at).getTime()
+    return new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime()
   })
 }
 

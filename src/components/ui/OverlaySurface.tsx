@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
 type OverlayVariant = 'modal' | 'drawer'
@@ -33,6 +34,11 @@ export function OverlaySurface({
   const descriptionId = useId()
   const panelRef = useRef<HTMLDivElement | null>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
+  const onCloseRef = useRef(onClose)
+
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
 
   useEffect(() => {
     if (!open) {
@@ -49,7 +55,7 @@ export function OverlaySurface({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
-        onClose()
+        onCloseRef.current()
       }
     }
 
@@ -65,14 +71,14 @@ export function OverlaySurface({
       document.body.style.overflow = previousOverflow
       previousFocusRef.current?.focus()
     }
-  }, [open, onClose])
+  }, [open])
 
   if (!open) {
     return null
   }
 
-  return (
-    <div className={`overlay-shell overlay-shell--${variant}`} role="presentation">
+  return createPortal(
+    <div className={`overlay-shell overlay-shell--${variant} is-opening`} role="presentation">
       <button
         type="button"
         className="overlay-shell__backdrop"
@@ -89,31 +95,43 @@ export function OverlaySurface({
         aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
       >
-        <header className="overlay-panel__header">
-          <div className="overlay-panel__copy">
-            {eyebrow ? <div className="overlay-panel__eyebrow">{eyebrow}</div> : null}
-            <h2 id={titleId}>{title}</h2>
-            {description ? (
-              <p id={descriptionId} className="overlay-panel__description">
-                {description}
-              </p>
-            ) : null}
-          </div>
+        {eyebrow || title || description ? (
+          <header className="overlay-panel__header">
+            <div className="overlay-panel__copy">
+              {eyebrow ? <div className="overlay-panel__eyebrow">{eyebrow}</div> : null}
+              <h2 id={titleId}>{title}</h2>
+              {description ? (
+                <p id={descriptionId} className="overlay-panel__description">
+                  {description}
+                </p>
+              ) : null}
+            </div>
 
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={closeLabel}
+              onClick={onClose}
+            >
+              <X size={18} />
+            </button>
+          </header>
+        ) : (
           <button
             type="button"
-            className="icon-button"
+            className="icon-button overlay-panel__close-floating"
             aria-label={closeLabel}
             onClick={onClose}
           >
             <X size={18} />
           </button>
-        </header>
+        )}
 
         <div className="overlay-panel__body">{children}</div>
 
         {footer ? <footer className="overlay-panel__footer">{footer}</footer> : null}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

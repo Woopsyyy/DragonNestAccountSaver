@@ -68,17 +68,36 @@ export function MetricCard({
   hint,
   accent = 'cool',
 }: MetricCardProps) {
-  return (
-    <article className={`metric-card metric-card--${accent}`}>
-      <div className="metric-card__header">
-        <span className="metric-card__icon">
-          <Icon size={18} />
-        </span>
-        <span className="metric-card__label">{label}</span>
-      </div>
+  const trendPercent = accent === 'success' ? '+12%' : accent === 'warm' ? '+3%' : '+8%'
+  const safeId = label.replace(/\s+/g, '')
 
-      <strong className="metric-card__value">{value}</strong>
-      <span className="metric-card__hint">{hint}</span>
+  return (
+    <article className={`metric-card metric-card--${accent}`} tabIndex={0}>
+      <div className="metric-card-info">
+        <div className="metric-card-header">
+          <div className="icon-wrapper">
+            <Icon size={18} />
+          </div>
+          <span className="metric-card-title">{label}</span>
+        </div>
+        <div className="metric-card-value">{value}</div>
+        <span className="metric-card-trend">
+          <strong className="trend-badge">{trendPercent}</strong>
+          {hint}
+        </span>
+      </div>
+      <div className="metric-card-chart">
+        <svg viewBox="0 0 100 50" preserveAspectRatio="none">
+          <path className="animated-path" d="M0,35 C20,30 30,10 50,20 S80,5 100,0" fill="none" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M0,35 C20,30 30,10 50,20 S80,5 100,0 L100,50 L0,50 Z" fill={`url(#metricGradient-${safeId})`} fillOpacity="0.4" stroke="none" />
+          <defs>
+            <linearGradient id={`metricGradient-${safeId}`} x1={0} y1={0} x2={0} y2={1}>
+              <stop offset="0%" stopOpacity={0.6} />
+              <stop offset="100%" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
     </article>
   )
 }

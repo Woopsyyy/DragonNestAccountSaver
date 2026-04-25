@@ -1,13 +1,21 @@
 import { useState, type ReactNode } from 'react'
-import { LogOut, Menu, X, type LucideIcon } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { ChevronDown, LogOut, Menu, X, type LucideIcon } from 'lucide-react'
 
 type CommandTheme = 'user' | 'admin'
 type ActionVariant = 'primary' | 'ghost' | 'warm'
 
-export type CommandNavItem<T extends string> = {
+export type CommandNavChild<T extends string> = {
   key: T
   label: string
   icon: LucideIcon
+}
+
+export type CommandNavItem<T extends string> = {
+  key: string
+  label: string
+  icon: LucideIcon
+  children?: CommandNavChild<T>[]
 }
 
 export type CommandMetric = {
@@ -23,66 +31,113 @@ export type CommandAction = {
   variant?: ActionVariant
 }
 
+type RailAction = {
+  label: string
+  icon: LucideIcon
+  onClick: () => void
+  variant: ActionVariant
+}
+
 type CommandShellProps<T extends string> = {
   theme: CommandTheme
-  brandInitial: string
+  brandIcon?: ReactNode
   brandTitle: string
   brandSubtitle: string
   roleLabel: string
   navItems: CommandNavItem<T>[]
   activeTab: T
   onTabChange: (key: T) => void
-  heroEyebrow: ReactNode
-  heroTitle: string
-  heroDescription: string
-  breadcrumb: string[]
-  heroMetrics: CommandMetric[]
-  heroActions?: CommandAction[]
-  heroAside?: ReactNode
   switchAction?: CommandAction
   onSignOut: () => void | Promise<void>
   children: ReactNode
 }
 
-function buttonClassName(variant: ActionVariant = 'ghost') {
-  if (variant === 'primary') {
-    return 'primary-button'
-  }
+// ── Portal tooltip state ───────────────────────────────────────────────────────
+type TooltipState = { label: string; x: number; y: number } | null
 
-  if (variant === 'warm') {
-    return 'secondary-button secondary-button--warm'
-  }
-
-  return 'ghost-button'
+function railItemClassName(variant: ActionVariant = 'ghost') {
+  if (variant === 'primary') return 'command-sidebar__rail-item is-primary'
+  if (variant === 'warm') return 'command-sidebar__rail-item is-warm'
+  return 'command-sidebar__rail-item'
 }
 
 export function CommandShell<T extends string>({
   theme,
-  brandInitial,
+  brandIcon,
   brandTitle,
   brandSubtitle,
   roleLabel,
   navItems,
   activeTab,
   onTabChange,
-  heroEyebrow,
-  heroTitle,
-  heroDescription,
-  breadcrumb,
-  heroMetrics,
-  heroActions = [],
-  heroAside,
   switchAction,
   onSignOut,
   children,
 }: CommandShellProps<T>) {
   const [navOpen, setNavOpen] = useState(false)
+  const [tooltip, setTooltip] = useState<TooltipState>(null)
 
-  const activeItem = navItems.find((item) => item.key === activeTab)
+  // Initialise expanded key to whichever group contains the current active tab
+  const [openNavKey, setOpenNavKey] = useState<string | null>(() => {
+    for (const item of navItems) {
+      if (item.children?.some((c) => c.key === activeTab)) return item.key
+    }
+    return null
+  })
+
+  // Derive the topbar label from active tab
+  const activeLabel = (() => {
+    for (const item of navItems) {
+      if (item.children) {
+        const child = item.children.find((c) => c.key === activeTab)
+        if (child) return child.label
+      } else if (item.key === activeTab) {
+        return item.label
+      }
+    }
+    return 'Dashboard'
+  })()
+
+  const utilityItems: RailAction[] = [
+    switchAction
+      ? {
+          label: switchAction.label,
+          icon: switchAction.icon,
+          onClick: () => { switchAction.onClick(); setNavOpen(false) },
+          variant: switchAction.variant ?? 'ghost',
+        }
+      : null,
+    {
+      label: 'Log out',
+      icon: LogOut,
+      onClick: () => { void onSignOut(); setNavOpen(false) },
+      variant: 'ghost' as const,
+    },
+  ].filter((item): item is RailAction => item !== null)
 
   function handleTabChange(nextTab: T) {
     onTabChange(nextTab)
     setNavOpen(false)
+  }
+
+  function handleNavItemClick(item: CommandNavItem<T>) {
+    if (item.children) {
+      setOpenNavKey((prev) => (prev === item.key ? null : item.key))
+    } else {
+      handleTabChange(item.key as T)
+    }
+  }
+
+  // ── Portal tooltip helpers ───────────────────────────────────────────────────
+  function showTooltip(el: HTMLElement, label: string) {
+    // Don't show tooltip when mobile drawer is open (labels are already visible)
+    if (navOpen) return
+    const rect = el.getBoundingClientRect()
+    setTooltip({ label, x: rect.right + 14, y: rect.top + rect.height / 2 })
+  }
+
+  function hideTooltip() {
+    setTooltip(null)
   }
 
   return (
@@ -95,47 +150,113 @@ export function CommandShell<T extends string>({
       />
 
       <aside className={`command-sidebar${navOpen ? ' is-open' : ''}`}>
-        <div className="command-sidebar__brand">
-          <div className="command-sidebar__brand-mark">{brandInitial}</div>
-          <div className="command-sidebar__brand-copy">
-            <strong>{brandTitle}</strong>
-            <span>{brandSubtitle}</span>
-            <em>{roleLabel}</em>
+        <div className="command-sidebar__rail">
+          <div
+            className="command-sidebar__brand"
+            aria-label={`${brandSubtitle} · ${roleLabel}`}
+            title={`${brandSubtitle} · ${roleLabel}`}
+          >
+            {brandIcon ? (
+              <div className="command-sidebar__brand-icon">{brandIcon}</div>
+            ) : null}
+            <div className="command-sidebar__brand-copy">
+              <strong>{brandTitle}</strong>
+              <span>{brandSubtitle}</span>
+              <em>{roleLabel}</em>
+            </div>
+          </div>
+
+          <nav className="command-sidebar__nav" aria-label="Dashboard sections">
+            {navItems.map((item) => {
+              const hasChildren = Boolean(item.children?.length)
+              const isGroupOpen = openNavKey === item.key
+              const isActive = hasChildren
+                ? item.children!.some((c) => c.key === activeTab)
+                : item.key === activeTab
+
+              return (
+                <div key={item.key} className="command-sidebar__nav-group">
+                  {/* Parent / leaf button */}
+                  <button
+                    type="button"
+                    className={[
+                      'command-sidebar__nav-item',
+                      isActive ? 'is-active' : '',
+                      hasChildren ? 'has-children' : '',
+                    ].filter(Boolean).join(' ')}
+                    aria-label={item.label}
+                    title={item.label}
+                    data-label={item.label}
+                    onClick={() => handleNavItemClick(item)}
+                    onMouseEnter={(e) => showTooltip(e.currentTarget, item.label)}
+                    onMouseLeave={hideTooltip}
+                    onFocus={(e) => showTooltip(e.currentTarget, item.label)}
+                    onBlur={hideTooltip}
+                  >
+                    <span className="command-sidebar__icon-wrap" aria-hidden="true">
+                      <item.icon size={18} />
+                    </span>
+                    <span className="command-sidebar__item-label">{item.label}</span>
+                    {hasChildren && (
+                      <ChevronDown
+                        size={12}
+                        className={`nav-group__chevron${isGroupOpen ? ' is-open' : ''}`}
+                        aria-hidden="true"
+                      />
+                    )}
+                  </button>
+
+                  {/* Children slide-down */}
+                  {hasChildren && isGroupOpen ? (
+                    <div className="command-sidebar__nav-children">
+                      {item.children!.map((child) => (
+                        <button
+                          key={child.key}
+                          type="button"
+                          className={`command-sidebar__nav-child${activeTab === child.key ? ' is-active' : ''}`}
+                          aria-label={child.label}
+                          title={child.label}
+                          data-label={child.label}
+                          onClick={() => handleTabChange(child.key)}
+                          onMouseEnter={(e) => showTooltip(e.currentTarget, child.label)}
+                          onMouseLeave={hideTooltip}
+                          onFocus={(e) => showTooltip(e.currentTarget, child.label)}
+                          onBlur={hideTooltip}
+                        >
+                          <span className="command-sidebar__icon-wrap" aria-hidden="true">
+                            <child.icon size={15} />
+                          </span>
+                          <span className="command-sidebar__item-label">{child.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              )
+            })}
+          </nav>
+
+          <div className="command-sidebar__spine" aria-hidden="true" />
+
+          <div className="command-sidebar__utility" aria-label="Dashboard actions">
+            {utilityItems.map(({ label, icon: Icon, onClick, variant }) => (
+              <button
+                key={label}
+                type="button"
+                className={railItemClassName(variant)}
+                aria-label={label}
+                title={label}
+                data-label={label}
+                onClick={onClick}
+              >
+                <span className="command-sidebar__icon-wrap" aria-hidden="true">
+                  <Icon size={18} />
+                </span>
+                <span className="command-sidebar__item-label">{label}</span>
+              </button>
+            ))}
           </div>
         </div>
-
-        {switchAction ? (
-          <button
-            type="button"
-            className={`command-sidebar__switch ${buttonClassName(switchAction.variant)}`}
-            onClick={() => {
-              switchAction.onClick()
-              setNavOpen(false)
-            }}
-          >
-            <switchAction.icon size={16} />
-            {switchAction.label}
-          </button>
-        ) : null}
-
-        <nav className="command-sidebar__nav" aria-label="Dashboard sections">
-          {navItems.map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              type="button"
-              className={`command-sidebar__nav-item${activeTab === key ? ' is-active' : ''}`}
-              onClick={() => handleTabChange(key)}
-            >
-              <Icon size={18} />
-              <span>{label}</span>
-            </button>
-          ))}
-        </nav>
-
-        <button type="button" className="ghost-button command-sidebar__logout" onClick={() => void onSignOut()}>
-          <LogOut size={16} />
-          Log out
-        </button>
       </aside>
 
       <div className="command-main">
@@ -150,8 +271,8 @@ export function CommandShell<T extends string>({
           </button>
 
           <div className="command-topbar__copy">
-            <span>{brandTitle}</span>
-            <strong>{activeItem?.label ?? heroTitle}</strong>
+            <span>{brandSubtitle}</span>
+            <strong>{activeLabel}</strong>
           </div>
 
           <button
@@ -164,57 +285,22 @@ export function CommandShell<T extends string>({
           </button>
         </header>
 
-        <section className="panel command-hero">
-          <div className="command-hero__copy">
-            <div className="eyebrow">{heroEyebrow}</div>
-
-            <div className="command-hero__breadcrumbs" aria-label="Current location">
-              {breadcrumb.map((segment, index) => (
-                <span key={`${segment}-${index}`} className="command-hero__breadcrumb">
-                  {segment}
-                </span>
-              ))}
-            </div>
-
-            <h1>{heroTitle}</h1>
-            <p>{heroDescription}</p>
-
-            {heroActions.length > 0 ? (
-              <div className="command-hero__actions">
-                {heroActions.map(({ label, icon: Icon, onClick, variant }) => (
-                  <button
-                    key={label}
-                    type="button"
-                    className={buttonClassName(variant)}
-                    onClick={onClick}
-                  >
-                    <Icon size={16} />
-                    {label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-
-            <div className="command-hero__metrics">
-              {heroMetrics.map(({ label, value, icon: Icon }) => (
-                <article key={label} className="command-hero__metric">
-                  <span className="command-hero__metric-icon">
-                    <Icon size={16} />
-                  </span>
-                  <div>
-                    <strong>{value}</strong>
-                    <span>{label}</span>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </div>
-
-          <div className="command-hero__aside">{heroAside}</div>
-        </section>
-
         <div className="command-main__content">{children}</div>
       </div>
+
+      {/* Portal tooltip — renders at document.body, outside any overflow container */}
+      {tooltip !== null && !navOpen
+        ? createPortal(
+            <div
+              className="sidebar-tooltip"
+              style={{ left: tooltip.x, top: tooltip.y }}
+              aria-hidden="true"
+            >
+              {tooltip.label}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   )
 }

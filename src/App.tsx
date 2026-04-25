@@ -2,7 +2,6 @@ import type { Session } from '@supabase/supabase-js';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import LandingPage from './components/LandingPage';
 import Dashboard from './components/Dashboard';
-import AdminDashboard from './components/AdminDashboard';
 import { useEffect, useState } from 'react';
 import { getBrowserClient, getMyUser, type User } from './lib/supabase';
 
@@ -142,16 +141,6 @@ function App() {
             session
               ? <Dashboard user={user} />
               : <Navigate to="/" />
-          }
-        />
-        <Route
-          path="/admin"
-          element={
-            session && user?.is_admin
-              ? <AdminDashboard user={user} />
-              : session
-                ? <Dashboard user={user} />   // non-admin users get the regular dashboard
-                : <Navigate to="/" />
           }
         />
         <Route path="*" element={<Navigate to="/" />} />
