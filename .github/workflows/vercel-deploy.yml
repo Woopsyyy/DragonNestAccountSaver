@@ -1,0 +1,93 @@
+name: CI/CD Pipeline (Vercel)
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  validate-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build (Typecheck & Vite)
+        run: npm run build
+
+      - name: Pull Vercel Environment Information
+        run: npx vercel pull --yes --environment=production --token ${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Build Project Artifacts
+        run: npx vercel build --prod --token ${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Deploy Project Artifacts to Vercel
+        id: deploy
+        run: |
+          DEPLOY_URL=$(npx vercel deploy --prebuilt --prod --token ${{ secrets.VERCEL_TOKEN }})
+          echo "DEPLOY_URL=$DEPLOY_URL" >> $GITHUB_ENV
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Get short SHA
+        run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+      - name: Notify Discord Success
+        if: success()
+        run: |
+          curl -H "Content-Type: application/json" \
+               -d '{
+                 "embeds": [{
+                   "title": "✅ SUCCESS | CI Passed",
+                   "color": 65280,
+                   "fields": [
+                     { "name": "📦 Repository", "value": "${{ github.repository }}", "inline": true },
+                     { "name": "🔗 Branch", "value": "${{ github.ref_name }}", "inline": true },
+                     { "name": "🔖 Commit", "value": "'"${SHORT_SHA}"'", "inline": true },
+                     { "name": "👤 Actor", "value": "${{ github.actor }}", "inline": true },
+                     { "name": "🚀 Deployment", "value": "'"${DEPLOY_URL}"'", "inline": false },
+                     { "name": "🔗 Run Logs", "value": "[View Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})", "inline": false }
+                   ]
+                 }]
+               }' \
+               ${{ secrets.DISCORD_WEBHOOK_SUCCESS }}
+
+      - name: Notify Discord Failure
+        if: failure()
+        run: |
+          curl -H "Content-Type: application/json" \
+               -d '{
+                 "embeds": [{
+                   "title": "❌ FAILED | CI Failed",
+                   "color": 16711680,
+                   "fields": [
+                     { "name": "📦 Repository", "value": "${{ github.repository }}", "inline": true },
+                     { "name": "🔗 Branch", "value": "${{ github.ref_name }}", "inline": true },
+                     { "name": "🔖 Commit", "value": "'"${SHORT_SHA}"'", "inline": true },
+                     { "name": "👤 Actor", "value": "${{ github.actor }}", "inline": true },
+                     { "name": "📝 Summary", "value": "Validation or deployment failed! Click the run link for details.", "inline": false },
+                     { "name": "🔗 Run Logs", "value": "[View Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})", "inline": false }
+                   ]
+                 }]
+               }' \
+               ${{ secrets.DISCORD_WEBHOOK_FAILURE }}
