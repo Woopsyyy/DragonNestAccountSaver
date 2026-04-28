@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useState, Fragment, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, Fragment, type FormEvent } from 'react'
 import {
+  AlertTriangle,
   BookOpen,
   Calculator,
   ChevronDown,
   CircleGauge,
+  Clock3,
   Database,
   FilterX,
   LayoutDashboard,
@@ -37,14 +39,17 @@ import {
   deleteDragonAccount,
   deletePet,
   deleteTicket,
+  deleteUserAccount,
   getBrowserClient,
   listClassTree,
   listDragonAccounts,
   listPatchnotes,
   listPets,
   listTickets,
+  resetFinishedSpamRuns,
   updateDragonAccount,
   updateDragonAccountCounter,
+  updateDragonAccountLevel,
   updateMyPassword,
   updateMyUsername,
   type CounterField,
@@ -86,13 +91,19 @@ import {
   resetUserPassword,
   toggleUserAdmin,
 } from '../lib/supabase'
+import ResetLoader from './ResetLoader'
 
 
 type DrawerMode = 'create' | 'edit' | null
 type LoadState = 'loading' | 'ready' | 'error'
 type PendingCounterMap = Record<string, boolean>
+type PendingLevelMap = Record<string, boolean>
 type Tab = 'overview' | 'classes' | 'calculator' | 'spam' | 'ticket-tab' | 'patchnotes' | 'pet' | 'settings' | 'admin-overview' | 'users' | 'admin-patchnotes' | 'admin-classes'
 type AddMode = 'class' | 'type_class' | 'sub_class'
+type ResetOverlayState = {
+  title: string
+  detail: string
+} | null
 
 type TicketDraft = {
   ign: string
@@ -108,6 +119,11 @@ type PetDraft = {
 type PetDrawerMode = 'create' | null
 
 const ROSTER_TIMEOUT_MS = 8000
+const MAX_LEVEL_THRESHOLD = 100
+const DAILY_RESET_HOUR = 9
+const WEEKLY_RESET_DAY = 6
+const DAILY_RESET_STORAGE_KEY = 'dragonnest:last-daily-reset'
+const WEEKLY_RESET_STORAGE_KEY = 'dragonnest:last-weekly-reset'
 
 function createEmptyDraft(): DrawerDraft {
   return {
@@ -127,12 +143,20 @@ function createEmptyPetDraft(): PetDraft {
   return { ign: '', expiration_date: '' }
 }
 
+function normalizeIgn(value: string): string {
+  return value.trim().toLowerCase()
+}
+
 function isNearExpiration(dateStr: string): boolean {
   const expDate = new Date(dateStr)
   const now = new Date()
   const diffTime = expDate.getTime() - now.getTime()
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
   return diffDays <= 1
+}
+
+function isMaxLevelAccount(account: DragonAccount): boolean {
+  return account.level >= MAX_LEVEL_THRESHOLD
 }
 
 function createDraftFromAccount(account: DragonAccount): DrawerDraft {
@@ -216,6 +240,10 @@ function counterKey(id: string, field: CounterField) {
   return `${id}:${field}`
 }
 
+function levelKey(id: string) {
+  return `${id}:level`
+}
+
 function monthlyTrend(records: string[], length = 6) {
   const formatter = new Intl.DateTimeFormat('en-US', { month: 'short' })
   const now = new Date()
@@ -252,6 +280,101 @@ function buildPassword() {
       ? chars[value % chars.length]
       : special[value % special.length],
   ).join('')
+}
+
+function toResetKey(date: Date): string {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+    String(date.getHours()).padStart(2, '0'),
+  ].join('-')
+}
+
+function getMostRecentDailyReset(now: Date): Date {
+  const reset = new Date(now)
+  reset.setHours(DAILY_RESET_HOUR, 0, 0, 0)
+
+  if (now.getTime() < reset.getTime()) {
+    reset.setDate(reset.getDate() - 1)
+  }
+
+  return reset
+}
+
+function getNextDailyReset(now: Date): Date {
+  const reset = new Date(now)
+  reset.setHours(DAILY_RESET_HOUR, 0, 0, 0)
+
+  if (now.getTime() >= reset.getTime()) {
+    reset.setDate(reset.getDate() + 1)
+  }
+
+  return reset
+}
+
+function getMostRecentWeeklyReset(now: Date): Date {
+  const reset = new Date(now)
+  reset.setHours(DAILY_RESET_HOUR, 0, 0, 0)
+  const dayOffset = (reset.getDay() - WEEKLY_RESET_DAY + 7) % 7
+  reset.setDate(reset.getDate() - dayOffset)
+
+  if (now.getTime() < reset.getTime()) {
+    reset.setDate(reset.getDate() - 7)
+  }
+
+  return reset
+}
+
+function getNextWeeklyReset(now: Date): Date {
+  const reset = new Date(now)
+  reset.setHours(DAILY_RESET_HOUR, 0, 0, 0)
+  const dayOffset = (WEEKLY_RESET_DAY - reset.getDay() + 7) % 7
+  reset.setDate(reset.getDate() + dayOffset)
+
+  if (now.getTime() >= reset.getTime()) {
+    reset.setDate(reset.getDate() + 7)
+  }
+
+  return reset
+}
+
+function formatCountdown(target: Date, now: Date): string {
+  const totalSeconds = Math.max(0, Math.floor((target.getTime() - now.getTime()) / 1000))
+  const days = Math.floor(totalSeconds / 86400)
+  const hours = Math.floor((totalSeconds % 86400) / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+
+  const clock = [hours, minutes, seconds]
+    .map((value) => String(value).padStart(2, '0'))
+    .join(':')
+
+  return days > 0 ? `${days}d ${clock}` : clock
+}
+
+function formatResetMoment(target: Date): string {
+  return target.toLocaleString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+function mergeUpdatedAccounts(
+  currentAccounts: DragonAccount[],
+  updatedAccounts: DragonAccount[],
+): DragonAccount[] {
+  if (updatedAccounts.length === 0) {
+    return currentAccounts
+  }
+
+  const updatesById = new Map(updatedAccounts.map((account) => [account.id, account]))
+  return sortAccountsNewestFirst(
+    currentAccounts.map((account) => updatesById.get(account.id) ?? account),
+  )
 }
 
 function ClassTreeManager({
@@ -585,6 +708,42 @@ function ButtonLink({
   )
 }
 
+function ResetTimerCard({
+  label,
+  countdown,
+  nextAt,
+  hint,
+}: {
+  label: string
+  countdown: string
+  nextAt: string
+  hint: string
+}) {
+  return (
+    <section className="clock-card reset-timer-card" aria-label={`${label} countdown`}>
+      <div className="clock-card__heading">
+        <div className="eyebrow">
+          <Clock3 size={14} />
+          {label}
+        </div>
+        <span className="status-chip">
+          <Sparkles size={14} />
+          Auto
+        </span>
+      </div>
+
+      <div>
+        <div className="clock-card__time">{countdown}</div>
+        <p>{nextAt}</p>
+      </div>
+
+      <div className="clock-card__meta">
+        <span className="pill">{hint}</span>
+      </div>
+    </section>
+  )
+}
+
 function SettingsView({
   user,
   onUsernameUpdate,
@@ -757,6 +916,7 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
   const [drawerErrors, setDrawerErrors] = useState<DrawerErrors>({})
   const [saving, setSaving] = useState(false)
   const [pendingCounters, setPendingCounters] = useState<PendingCounterMap>({})
+  const [pendingLevels, setPendingLevels] = useState<PendingLevelMap>({})
   const [classNodes, setClassNodes] = useState<FlatClassNode[]>([])
   const [patchnotes, setPatchnotes] = useState<Patchnote[]>([])
 
@@ -779,12 +939,17 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
   const [users, setUsers] = useState<User[]>([])
   const [search, setSearch] = useState('')
   const [resetting, setResetting] = useState<string | null>(null)
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null)
   const [passwordResult, setPasswordResult] = useState<{ username: string; password: string } | null>(null)
   const [isComposerOpen, setIsComposerOpen] = useState(false)
   const [patchTitle, setPatchTitle] = useState('')
   const [patchContent, setPatchContent] = useState('')
   const [savingPatchnote, setSavingPatchnote] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [resetOverlay, setResetOverlay] = useState<ResetOverlayState>(null)
+  const [nowTick, setNowTick] = useState(() => Date.now())
+  const resetInFlightRef = useRef(false)
+  const failedResetKeyRef = useRef<string | null>(null)
 
   const userGrowthData = useMemo(() => monthlyTrend(users.map((entry) => entry.created_at)), [users])
   const patchnoteActivityData = useMemo(() => monthlyTrend(patchnotes.map((entry) => entry.created_at)), [patchnotes])
@@ -810,12 +975,20 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
     [users, search]
   )
 
-
   const liveClassTree = useMemo(() => buildClassTree(classNodes), [classNodes])
   const rootClassOptions = liveClassTree.map((node) => node.label)
   const currentUser = initialUser
     ? { ...initialUser, username: usernameOverride ?? initialUser.username }
     : null
+  const now = useMemo(() => new Date(nowTick), [nowTick])
+  const nextDailyReset = useMemo(() => getNextDailyReset(now), [now])
+  const nextWeeklyReset = useMemo(() => getNextWeeklyReset(now), [now])
+  const dailyResetCountdown = useMemo(() => formatCountdown(nextDailyReset, now), [nextDailyReset, now])
+  const weeklyResetCountdown = useMemo(() => formatCountdown(nextWeeklyReset, now), [nextWeeklyReset, now])
+  const urgentTicketIgns = useMemo(
+    () => new Set(tickets.filter((ticket) => isNearExpiration(ticket.expiration_date)).map((ticket) => normalizeIgn(ticket.ign))),
+    [tickets],
+  )
 
   const filteredAccounts = useMemo(
     () =>
@@ -824,8 +997,14 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
       ),
     [accounts, filterPath, searchQuery],
   )
-
-  const ticketTotal = accounts.reduce((sum, account) => sum + account.ticket, 0)
+  const spamAccounts = useMemo(
+    () => filteredAccounts.filter((account) => isMaxLevelAccount(account)),
+    [filteredAccounts],
+  )
+  const maxLevelAccounts = useMemo(
+    () => accounts.filter((account) => isMaxLevelAccount(account)),
+    [accounts],
+  )
 
   const navItems: CommandNavItem<Tab>[] = [
     { key: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -933,6 +1112,117 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
       cancelled = true
     }
   }, [initialUser?.is_admin])
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNowTick(Date.now())
+    }, 1000)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [])
+
+  async function handleScheduledReset(
+    modes: Array<'daily' | 'weekly'>,
+    resettableAccounts: DragonAccount[],
+    dailyKey: string,
+    weeklyKey: string,
+  ) {
+    const resetLabel =
+      modes.length === 2
+        ? 'Running daily and weekly reset'
+        : modes[0] === 'weekly'
+          ? 'Running weekly reset'
+          : 'Running daily reset'
+
+    setResetOverlay({
+      title: resetLabel,
+      detail: 'Refreshing finished spam runs and updating the roster.',
+    })
+
+    try {
+      const updatedAccounts = await resetFinishedSpamRuns(
+        resettableAccounts.map((account) => account.id),
+      )
+
+      setAccounts((currentAccounts) =>
+        mergeUpdatedAccounts(currentAccounts, updatedAccounts),
+      )
+
+      if (modes.includes('daily')) {
+        window.localStorage.setItem(DAILY_RESET_STORAGE_KEY, dailyKey)
+      }
+
+      if (modes.includes('weekly')) {
+        window.localStorage.setItem(WEEKLY_RESET_STORAGE_KEY, weeklyKey)
+      }
+
+      failedResetKeyRef.current = null
+    } catch (resetError) {
+      failedResetKeyRef.current = `${dailyKey}|${weeklyKey}`
+      setTableError(toMessage(resetError, 'The automatic spam reset failed.'))
+    } finally {
+      window.setTimeout(() => {
+        setResetOverlay(null)
+        resetInFlightRef.current = false
+      }, 600)
+    }
+  }
+
+  useEffect(() => {
+    if (loadState !== 'ready' || resetInFlightRef.current) {
+      return
+    }
+
+    const mostRecentDailyReset = getMostRecentDailyReset(now)
+    const mostRecentWeeklyReset = getMostRecentWeeklyReset(now)
+    const dailyKey = toResetKey(mostRecentDailyReset)
+    const weeklyKey = toResetKey(mostRecentWeeklyReset)
+    const attemptedKey = `${dailyKey}|${weeklyKey}`
+
+    if (failedResetKeyRef.current === attemptedKey) {
+      return
+    }
+
+    const dueModes: Array<'daily' | 'weekly'> = []
+
+    if (window.localStorage.getItem(DAILY_RESET_STORAGE_KEY) !== dailyKey) {
+      dueModes.push('daily')
+    }
+
+    if (window.localStorage.getItem(WEEKLY_RESET_STORAGE_KEY) !== weeklyKey) {
+      dueModes.push('weekly')
+    }
+
+    if (dueModes.length === 0) {
+      return
+    }
+
+    const resettableAccounts = accounts.filter((account) => account.spam > 0)
+
+    if (resettableAccounts.length === 0) {
+      if (dueModes.includes('daily')) {
+        window.localStorage.setItem(DAILY_RESET_STORAGE_KEY, dailyKey)
+      }
+
+      if (dueModes.includes('weekly')) {
+        window.localStorage.setItem(WEEKLY_RESET_STORAGE_KEY, weeklyKey)
+      }
+
+      failedResetKeyRef.current = null
+      return
+    }
+
+    resetInFlightRef.current = true
+    const timeoutId = window.setTimeout(() => {
+      void handleScheduledReset(dueModes, resettableAccounts, dailyKey, weeklyKey)
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [accounts, loadState, now])
 
   function openCreateDrawer() {
     setDrawerMode('create')
@@ -1152,6 +1442,55 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
     }
   }
 
+  async function handleToggleLevel(account: DragonAccount) {
+    const pendingKey = levelKey(account.id)
+    const nextLevel = isMaxLevelAccount(account) ? 1 : MAX_LEVEL_THRESHOLD
+
+    setPendingLevels((current) => ({ ...current, [pendingKey]: true }))
+    setTableError(null)
+    setAccounts((currentAccounts) =>
+      sortAccountsNewestFirst(
+        currentAccounts.map((currentAccount) =>
+          currentAccount.id === account.id
+            ? {
+                ...currentAccount,
+                level: nextLevel,
+                updated_at: new Date().toISOString(),
+              }
+            : currentAccount,
+        ),
+      ),
+    )
+
+    try {
+      const savedAccount = await updateDragonAccountLevel(account.id, nextLevel)
+      setAccounts((currentAccounts) =>
+        sortAccountsNewestFirst(
+          currentAccounts.map((currentAccount) =>
+            currentAccount.id === account.id ? savedAccount : currentAccount,
+          ),
+        ),
+      )
+    } catch (levelError) {
+      setAccounts((currentAccounts) =>
+        sortAccountsNewestFirst(
+          currentAccounts.map((currentAccount) =>
+            currentAccount.id === account.id ? account : currentAccount,
+          ),
+        ),
+      )
+      setTableError(
+        `Unable to update level for ${account.account}: ${toMessage(levelError)}`,
+      )
+    } finally {
+      setPendingLevels((current) => {
+        const nextPending = { ...current }
+        delete nextPending[pendingKey]
+        return nextPending
+      })
+    }
+  }
+
   async function handleToggleRole(entry: User) {
     const nextIsAdmin = !entry.is_admin
     setError(null)
@@ -1169,6 +1508,34 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
         current.map((u) => (u.id === entry.id ? { ...u, is_admin: entry.is_admin } : u)),
       )
       setError(toMessage(toggleError, 'Failed to update user role.'))
+    }
+  }
+
+  async function handleDeleteUser(entry: User) {
+    if (entry.id === currentUser?.id) {
+      setError('You cannot delete your own account while you are still logged in.')
+      return
+    }
+
+    const confirmed = window.confirm(
+      `Delete ${entry.username ?? entry.id}? This will remove the user account and their roster data.`,
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    setDeletingUserId(entry.id)
+    setError(null)
+
+    try {
+      await deleteUserAccount(entry.id)
+      setUsers((current) => current.filter((userEntry) => userEntry.id !== entry.id))
+      void reloadAccounts()
+    } catch (deleteError) {
+      setError(toMessage(deleteError, 'Failed to delete the user account.'))
+    } finally {
+      setDeletingUserId(null)
     }
   }
 
@@ -1284,8 +1651,8 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
                   Overview
                 </>
               }
-              title="A real dashboard for the whole roster."
-              description="Track growth, class distribution, spam completion, and ticket totals without leaving the shell."
+              title="The whole roster, plus the next reset window."
+              description="Track max-level runs, urgent ticket pressure, and the exact time left before the daily and weekly spam reset."
             />
 
             <div className="metric-grid">
@@ -1297,23 +1664,39 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
               />
               <MetricCard
                 label="Max-level roster"
-                value={accounts.filter((account) => account.level >= 100).length}
+                value={maxLevelAccounts.length}
                 hint=""
                 icon={CircleGauge}
                 accent="success"
               />
               <MetricCard
                 label="Pending spam"
-                value={accounts.filter((account) => account.spam === 0).length}
+                value={maxLevelAccounts.filter((account) => account.spam === 0).length}
                 hint=""
                 icon={Database}
                 accent="warm"
               />
               <MetricCard
-                label="Total tickets"
-                value={ticketTotal}
+                label="Urgent ticket rows"
+                value={urgentTicketIgns.size}
                 hint=""
-                icon={Ticket}
+                icon={AlertTriangle}
+                accent="warm"
+              />
+            </div>
+
+            <div className="reset-timer-grid">
+              <ResetTimerCard
+                label="Daily reset"
+                countdown={dailyResetCountdown}
+                nextAt={`Next: ${formatResetMoment(nextDailyReset)}`}
+                hint="Finished spam runs reset every day at 9:00 AM."
+              />
+              <ResetTimerCard
+                label="Weekly reset"
+                countdown={weeklyResetCountdown}
+                nextAt={`Next: ${formatResetMoment(nextWeeklyReset)}`}
+                hint="The weekly reset lands every Saturday at 9:00 AM."
               />
             </div>
           </section>
@@ -1449,12 +1832,16 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
                         <tr>
                           <th>Account</th>
                           <th>Class path</th>
+                          <th>Level</th>
                           <th style={{ width: '40px' }}></th>
                         </tr>
                       </thead>
                       <tbody>
                         {filteredAccounts.map((account) => (
-                          <tr key={account.id} className="account-row">
+                          <tr
+                            key={account.id}
+                            className={`account-row${urgentTicketIgns.has(normalizeIgn(account.account)) ? ' row--alert' : ''}`}
+                          >
                             <td>
                               <div className="row-heading">
                                 <strong>{account.account}</strong>
@@ -1464,6 +1851,20 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
                               <span className="row-stack">
                                 {joinClassPath(account.class_path)}
                               </span>
+                            </td>
+                            <td>
+                              <button
+                                type="button"
+                                className={`counter-pill__state${isMaxLevelAccount(account) ? ' is-done' : ''}`}
+                                disabled={Boolean(pendingLevels[levelKey(account.id)])}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  void handleToggleLevel(account)
+                                }}
+                                style={{ margin: 0 }}
+                              >
+                                {isMaxLevelAccount(account) ? 'Max' : 'Not max'}
+                              </button>
                             </td>
                             <td>
                               <button
@@ -1559,11 +1960,13 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
                       <tbody>
                         {ignGroups.map(([ign, ignTickets]) => {
                           const isExpanded = expandedTicketIgn === ign
+                          const hasUrgentTicket = ignTickets.some((ticket) =>
+                            isNearExpiration(ticket.expiration_date),
+                          )
                           return (
-                            <>
+                            <Fragment key={ign}>
                               <tr
-                                key={ign}
-                                className={`account-row${isExpanded ? ' is-expanded' : ''}`}
+                                className={`account-row${isExpanded ? ' is-expanded' : ''}${hasUrgentTicket ? ' row--alert' : ''}`}
                                 onClick={() => setExpandedTicketIgn(isExpanded ? null : ign)}
                                 style={{ cursor: 'pointer' }}
                               >
@@ -1579,12 +1982,14 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
                                   </div>
                                 </td>
                                 <td>
-                                  <span className="status-chip">{ignTickets.length} ticket{ignTickets.length !== 1 ? 's' : ''}</span>
+                                  <span className={`status-chip${hasUrgentTicket ? ' status-chip--danger' : ''}`}>
+                                    {ignTickets.length} ticket{ignTickets.length !== 1 ? 's' : ''}
+                                  </span>
                                 </td>
                               </tr>
 
                               {isExpanded ? (
-                                <tr key={`${ign}-expand`} className="account-row-expand">
+                                <tr className="account-row-expand">
                                   <td colSpan={3}>
                                     <div className="row-expand-panel">
                                       <div className="ticket-sub-table-wrap">
@@ -1605,7 +2010,7 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
                                                   </div>
                                                 </td>
                                                 <td>
-                                                  <span className={`status-chip${new Date(t.expiration_date) < new Date() ? ' status-chip--warm' : ''}`}>
+                                                  <span className={`status-chip${isNearExpiration(t.expiration_date) ? ' status-chip--danger' : ''}`}>
                                                     {new Date(t.expiration_date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
                                                   </span>
                                                 </td>
@@ -1633,7 +2038,7 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
                                   </td>
                                 </tr>
                               ) : null}
-                            </>
+                            </Fragment>
                           )
                         })}
                       </tbody>
@@ -2055,27 +2460,32 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
                 />
               ) : null}
 
-              {loadState === 'ready' && filteredAccounts.length === 0 ? (
+              {loadState === 'ready' && spamAccounts.length === 0 ? (
                 <SurfaceState
                   icon={ShieldCheck}
-                  title={accounts.length === 0 ? 'No accounts saved yet' : 'No accounts match the search'}
+                  title={accounts.length === 0 ? 'No accounts saved yet' : 'No max-level accounts match the search'}
                   description={
                     accounts.length === 0
                       ? 'Create an account in the Accounts tab to start tracking spam runs.'
-                      : 'Clear the search query to see your accounts.'
+                      : 'Only accounts marked as max show here. Clear the search or switch more accounts to max.'
                   }
                   action={
-                    accounts.length > 0 ? (
+                    filteredAccounts.length > 0 ? (
                       <ButtonLink
-                        label="Clear filters"
+                        label="Show max-level accounts"
                         onClick={() => setSearchQuery('')}
+                      />
+                    ) : accounts.length > 0 ? (
+                      <ButtonLink
+                        label="Open accounts"
+                        onClick={() => setActiveTab('classes')}
                       />
                     ) : undefined
                   }
                 />
               ) : null}
 
-              {loadState === 'ready' && filteredAccounts.length > 0 ? (
+              {loadState === 'ready' && spamAccounts.length > 0 ? (
                 <>
                   <div className="table-wrap">
                     <table className="data-table">
@@ -2086,8 +2496,11 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredAccounts.map((account) => (
-                          <tr key={account.id} className="account-row">
+                        {spamAccounts.map((account) => (
+                          <tr
+                            key={account.id}
+                            className={`account-row${urgentTicketIgns.has(normalizeIgn(account.account)) ? ' row--alert' : ''}`}
+                          >
                             <td>
                               <div className="row-heading">
                                 <strong>{account.account}</strong>
@@ -2118,8 +2531,11 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
                   </div>
 
                   <div className="mobile-only data-card-grid">
-                    {filteredAccounts.map((account) => (
-                      <article key={account.id} className="table-card">
+                    {spamAccounts.map((account) => (
+                      <article
+                        key={account.id}
+                        className={`table-card${urgentTicketIgns.has(normalizeIgn(account.account)) ? ' table-card--alert' : ''}`}
+                      >
                         <div className="table-card__header">
                           <div className="row-heading">
                             <strong>{account.account}</strong>
@@ -2275,8 +2691,8 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
                   User management
                 </>
               }
-              title="Aligned rows and centered password reset feedback."
-              description="Search users, inspect joined dates, and reset passwords from a cleaner management surface."
+              title="Aligned rows, safer resets, and direct account cleanup."
+              description="Search users, inspect joined dates, reset passwords, and delete accounts without allowing self-deletion from the active session."
             />
 
             <section className="panel table-shell">
@@ -2332,15 +2748,27 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
                             </td>
                             <td>{new Date(entry.created_at).toLocaleDateString()}</td>
                             <td>
-                              <button
-                                type="button"
-                                className="ghost-button"
-                                disabled={resetting === entry.id}
-                                onClick={() => void handleResetPassword(entry)}
-                              >
-                                <KeyRound size={16} />
-                                {resetting === entry.id ? 'Resetting…' : 'Reset password'}
-                              </button>
+                              <div className="row-action-group">
+                                <button
+                                  type="button"
+                                  className="ghost-button"
+                                  disabled={resetting === entry.id}
+                                  onClick={() => void handleResetPassword(entry)}
+                                >
+                                  <KeyRound size={16} />
+                                  {resetting === entry.id ? 'Resetting…' : 'Reset password'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="secondary-button secondary-button--warm"
+                                  disabled={deletingUserId === entry.id || entry.id === currentUser?.id}
+                                  onClick={() => void handleDeleteUser(entry)}
+                                  title={entry.id === currentUser?.id ? 'You cannot delete your own active account.' : undefined}
+                                >
+                                  <Trash2 size={16} />
+                                  {deletingUserId === entry.id ? 'Deleting…' : 'Delete account'}
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -2484,6 +2912,13 @@ export default function Dashboard({ user: initialUser }: { user: User | null }) 
           </div>
         </form>
       </OverlaySurface>
+
+      {resetOverlay ? (
+        <ResetLoader
+          title={resetOverlay.title}
+          detail={resetOverlay.detail}
+        />
+      ) : null}
 
       {error ? (
         <ToastNotification

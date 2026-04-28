@@ -2,55 +2,38 @@ import { useState } from 'react'
 import {
   ArrowRight,
   Castle,
-  Crown,
-  Gem,
-  ScrollText,
+  Clock3,
+  LayoutDashboard,
   ShieldCheck,
   Sparkles,
   Swords,
-  WandSparkles,
+  Ticket,
 } from 'lucide-react'
 
 import LoginPage from './LoginPage'
-import Lanyard from './Lanyard'
 import { OverlaySurface } from './ui/OverlaySurface'
 
 const HERO_STATS = [
-  { label: 'All characters', value: 'One roster view' },
-  { label: 'Quick resets', value: 'Track spam and tickets' },
-  { label: 'Live dashboards', value: 'User and admin command centers' },
+  { label: 'Daily reset', value: 'Every day at 9:00 AM' },
+  { label: 'Weekly reset', value: 'Saturday at 9:00 AM' },
+  { label: 'Ticket warning', value: 'Red rows flag urgent runs' },
 ] as const
 
 const FEATURES = [
   {
-    icon: Castle,
-    title: 'Command shell',
-    description: 'Move through the user and admin experience inside one shared visual system.',
+    icon: LayoutDashboard,
+    title: 'Dashboard first',
+    description: 'Open the roster, spam runs, tickets, and admin tools from one cleaner shell.',
   },
   {
-    icon: Gem,
-    title: 'Class path clarity',
-    description: 'Keep origin, discipline, and ascension routes readable in both forms and analytics.',
+    icon: Clock3,
+    title: 'Timed resets',
+    description: 'Daily and weekly timers stay visible so the next spam reset is always easy to read.',
   },
   {
-    icon: ShieldCheck,
-    title: 'Aligned controls',
-    description: 'Centered drawers, cleaner rows, and responsive cards keep the interface easier to scan.',
-  },
-] as const
-
-const JOURNEY = [
-  {
-    title: 'Map the roster',
-    description: 'Create accounts once, lock in class paths, and keep the whole nest visible.',
-  },
-  {
-    title: 'Track weekly flow',
-    description: 'Update ticket and spam counters from a command surface that stays consistent.',
-  },
-  {
-    title: 'Move with confidence',
-    description: 'Open the dashboard and see stats, graphs, patchnotes, and admin controls at a glance.',
+    icon: Ticket,
+    title: 'Urgent ticket signal',
+    description: 'Accounts with near-expiring tickets stand out immediately before you lose the run.',
   },
 ] as const
 
@@ -66,11 +49,10 @@ export default function LandingPage() {
               <Swords size={14} />
               Dragon Nest Account Saver
             </div>
-            <h1>Run every alt like a polished raid command deck.</h1>
+            <h1>Keep the nest tight, reset on time, and run the right account first.</h1>
             <p>
-              The app now lands as a full neon-fantasy command center, from login to user
-              dashboard to admin control. Everything stays centered, aligned, and easier to
-              read under pressure.
+              One cleaner landing page, one dashboard shell, and the exact loop that matters:
+              watch the timers, spot urgent tickets, and reset finished spam runs automatically.
             </p>
 
             <div className="landing-hero__actions">
@@ -78,9 +60,9 @@ export default function LandingPage() {
                 Enter the Nest
                 <ArrowRight size={18} />
               </button>
-              <a href="#landing-workflow" className="ghost-button">
-                See the workflow
-                <ScrollText size={18} />
+              <a href="#landing-overview" className="ghost-button">
+                See the reset flow
+                <Clock3 size={18} />
               </a>
             </div>
 
@@ -100,52 +82,53 @@ export default function LandingPage() {
                 <div>
                   <div className="eyebrow">
                     <Castle size={14} />
-                    Command preview
+                    Quick loop
                   </div>
-                  <h2>Dashboard-first design</h2>
+                  <h2>What the dashboard now watches</h2>
                 </div>
-                <span className="landing-preview__badge">Live redesign</span>
+                <span className="landing-preview__badge">Live timers</span>
               </div>
 
-              <div className="landing-preview__grid">
-                <article className="landing-preview__card">
-                  <strong>Hero summaries</strong>
-                  <p>Centered navigation context, quick actions, and real metrics in the first glance.</p>
+              <div className="landing-preview__list">
+                <article className="landing-preview__row">
+                  <strong>Daily reset</strong>
+                  <span>9:00 AM</span>
                 </article>
-                <article className="landing-preview__card">
-                  <strong>Pure SVG graphs</strong>
-                  <p>Track account growth, level bands, role splits, and ticket totals without heavy chart libraries.</p>
+                <article className="landing-preview__row">
+                  <strong>Weekly reset</strong>
+                  <span>Saturday 9:00 AM</span>
                 </article>
-                <article className="landing-preview__card">
-                  <strong>Unified overlays</strong>
-                  <p>Drawers and modals now share the same polished shell, spacing, and focus behavior.</p>
+                <article className="landing-preview__row">
+                  <strong>Spam visibility</strong>
+                  <span>Only max-level accounts stay in the run list</span>
                 </article>
-                <article className="landing-preview__card">
-                  <strong>Responsive rows</strong>
-                  <p>Tables stay aligned on desktop and collapse into clean cards on smaller screens.</p>
+                <article className="landing-preview__row">
+                  <strong>Ticket warning</strong>
+                  <span>Urgent accounts turn red so the next run is obvious</span>
                 </article>
               </div>
 
-              <div className="landing-preview__float landing-preview__card">
-                <strong>Animated atmosphere</strong>
-                <p>Light rays, subtle float motion, and richer depth without turning the UI into noise.</p>
+              <div className="landing-preview__summary">
+                <span className="landing-preview__status">
+                  <ShieldCheck size={16} />
+                  Cleaner first glance
+                </span>
+                <p>Sign in once, open the shell, and keep the real account loop in front of you.</p>
               </div>
-
-              <Lanyard />
             </div>
           </div>
         </section>
 
-        <section id="landing-workflow" className="panel landing-panel landing-section">
+        <section id="landing-overview" className="panel landing-panel landing-section">
           <div className="landing-section__header">
             <div className="eyebrow">
-              <WandSparkles size={14} />
-              What changed
+              <Sparkles size={14} />
+              Overview
             </div>
-            <h2>Everything now follows one command-center language.</h2>
+            <h2>The first screen now stays focused on the actual workflow.</h2>
             <p>
-              Shared panels, responsive tables, centered drawers, aligned forms, and cleaner
-              graphs now connect the whole app instead of leaving each screen in its own style island.
+              The landing page is lighter, the timers are part of the dashboard flow, and the
+              ticket pressure points are easier to spot before you start running accounts.
             </p>
           </div>
 
@@ -159,44 +142,6 @@ export default function LandingPage() {
                 <p>{description}</p>
               </article>
             ))}
-          </div>
-        </section>
-
-        <section className="panel landing-panel landing-section">
-          <div className="landing-section__header">
-            <div className="eyebrow">
-              <ScrollText size={14} />
-              Weekly loop
-            </div>
-            <h2>Built around the actual player workflow.</h2>
-            <p>From setup to tracking to admin maintenance, the screens now feel like one continuous product.</p>
-          </div>
-
-          <div className="landing-journey">
-            {JOURNEY.map((step, index) => (
-              <article key={step.title} className="landing-step">
-                <span className="landing-step__index">0{index + 1}</span>
-                <strong>{step.title}</strong>
-                <p>{step.description}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel landing-panel landing-cta">
-          <div className="landing-cta__copy">
-            <div className="eyebrow">
-              <Crown size={14} />
-              Ready to organize the nest?
-            </div>
-            <h2>Sign in, open the dashboards, and keep the roster under control.</h2>
-          </div>
-
-          <div className="landing-cta__actions">
-            <button type="button" className="primary-button" onClick={() => setDrawerOpen(true)}>
-              Start now
-              <ArrowRight size={18} />
-            </button>
           </div>
         </section>
       </main>

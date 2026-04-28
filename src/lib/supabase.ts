@@ -116,6 +116,10 @@ type Database = {
     }
     Views: Record<string, never>
     Functions: {
+      admin_delete_user: {
+        Args: { target_user_id: string }
+        Returns: void
+      }
       admin_reset_password: {
         Args: { user_id: string; new_password: string }
         Returns: void
@@ -228,6 +232,41 @@ export async function updateDragonAccountCounter(
     .eq('id', id)
     .select(DRAGON_ACCOUNT_COLUMNS)
     .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function updateDragonAccountLevel(
+  id: string,
+  level: number,
+): Promise<DragonAccount> {
+  const client = getBrowserClient()
+  const { data, error } = await client
+    .from('dragon_accounts')
+    .update({ level })
+    .eq('id', id)
+    .select(DRAGON_ACCOUNT_COLUMNS)
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function resetFinishedSpamRuns(
+  accountIds: string[],
+): Promise<DragonAccount[]> {
+  if (accountIds.length === 0) {
+    return []
+  }
+
+  const client = getBrowserClient()
+  const { data, error } = await client
+    .from('dragon_accounts')
+    .update({ spam: 0 })
+    .in('id', accountIds)
+    .gt('spam', 0)
+    .select(DRAGON_ACCOUNT_COLUMNS)
 
   if (error) throw error
   return data
@@ -418,6 +457,14 @@ export async function toggleUserAdmin(userId: string, isAdmin: boolean): Promise
     .from('users')
     .update({ is_admin: isAdmin })
     .eq('id', userId)
+  if (error) throw error
+}
+
+export async function deleteUserAccount(userId: string): Promise<void> {
+  const client = getBrowserClient()
+  const { error } = await client.rpc('admin_delete_user', {
+    target_user_id: userId,
+  })
   if (error) throw error
 }
 

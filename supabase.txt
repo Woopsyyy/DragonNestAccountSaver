@@ -26,6 +26,42 @@ begin
 end;
 $$ language plpgsql security definer set search_path = public;
 
+create or replace function public.admin_delete_user(target_user_id uuid)
+returns void as $$
+begin
+  if not exists (select 1 from public.users where id = auth.uid() and is_admin = true) then
+    raise exception 'Unauthorized';
+  end if;
+
+  if target_user_id = auth.uid() then
+    raise exception 'You cannot delete your own active account.';
+  end if;
+
+  delete from public.dragon_accounts where user_id = target_user_id;
+
+  if exists (
+    select 1
+    from information_schema.tables
+    where table_schema = 'public'
+      and table_name = 'tickets'
+  ) then
+    execute 'delete from public.tickets where user_id = $1' using target_user_id;
+  end if;
+
+  if exists (
+    select 1
+    from information_schema.tables
+    where table_schema = 'public'
+      and table_name = 'pets'
+  ) then
+    execute 'delete from public.pets where user_id = $1' using target_user_id;
+  end if;
+
+  delete from public.users where id = target_user_id;
+  delete from auth.users where id = target_user_id;
+end;
+$$ language plpgsql security definer set search_path = public, auth;
+
 -- =============================================
 -- USERS TABLE (Linked to Auth.Users)
 -- =============================================

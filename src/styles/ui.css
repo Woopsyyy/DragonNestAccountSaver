@@ -1658,6 +1658,18 @@
               0 6px 16px rgba(0, 0, 0, 0.15);
 }
 
+.data-table tbody tr.row--alert {
+  background: rgba(239, 68, 68, 0.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 2px 8px rgba(127, 29, 29, 0.16);
+}
+
+.data-table tbody tr.row--alert:hover,
+.data-table tbody tr.row--alert:focus-within {
+  background: rgba(239, 68, 68, 0.18);
+}
+
 /* ── Collapsible account rows ─────────────────────────────── */
 
 .row-chevron-cell {
@@ -1852,6 +1864,12 @@
   background: rgba(103, 215, 162, 0.08);
 }
 
+.status-chip--danger {
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.24);
+  background: rgba(239, 68, 68, 0.14);
+}
+
 .counter-pill {
   display: inline-flex;
   align-items: center;
@@ -2031,6 +2049,11 @@
   gap: 16px;
 }
 
+.table-card--alert {
+  border-color: rgba(248, 113, 113, 0.22);
+  background: rgba(239, 68, 68, 0.1);
+}
+
 .form-panel code {
   color: var(--text-strong);
   font-family: var(--font-mono);
@@ -2133,6 +2156,23 @@
 
 .clock-card__meta {
   display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.reset-timer-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.reset-timer-card .clock-card__time {
+  font-size: clamp(1.7rem, 3vw, 2.4rem);
+}
+
+.row-action-group {
+  display: flex;
+  justify-content: center;
   gap: 10px;
   flex-wrap: wrap;
 }
@@ -2465,6 +2505,10 @@
 
   .mobile-only {
     display: grid !important;
+  }
+
+  .reset-timer-grid {
+    grid-template-columns: 1fr;
   }
 }
 
